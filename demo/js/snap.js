@@ -18,9 +18,23 @@
         prevY = 0,
         blue = '#2299ee',
         lightBlue = '#88ccff',
-        peppermint = '#44ee44',
         tango = '#ff4400',
-        draggingAnchor = null;
+        draggingAnchor = null,
+
+        snapGrid = {
+            x: 10,
+            y: 10,
+            range: 10,
+            offset: { x: 0, y: 0 }
+        },
+        gridFunc = interact.createSnapGrid(snapGrid),
+        anchors = [
+            {x: 100, y: 100, range: 200},
+            {x: 600, y: 400, range: Infinity},
+            {x: 500, y: 150, range: Infinity},
+            {x: 250, y: 250, range: Infinity}
+        ];
+
 
     function drawGrid (grid, gridOffset, range) {
         if (!grid.x || !grid.y) { return; }
@@ -88,13 +102,11 @@
         context.clearRect(0, 0, width, height);
         guidesContext.clearRect(0, 0, width, height);
 
-        if (!status.offMode.checked) {
-            if (snap.mode === 'grid') {
-                drawGrid(snap.grid, snap.gridOffset, snap.range);
-            }
-            else if (snap.mode === 'anchor') {
-                drawAnchors(snap.anchors, snap.range);
-            }
+        if (status.gridMode.checked) {
+            drawGrid(snapGrid, snapGrid.offset, snapGrid.range);
+        }
+        else if (status.anchorMode.checked) {
+            drawAnchors(anchors, snap.range);
         }
     }
 
@@ -139,17 +151,17 @@
 
     function anchorDragMove (event) {
         if (draggingAnchor) {
-            var snap = interact(canvas).snap();
+            var snap = interact(canvas).snap().drag;
 
             draggingAnchor.x += event.dx;
             draggingAnchor.y += event.dy;
 
-            drawAnchors(snap.anchors, snap.range);
+            drawAnchors(anchors, snap.range);
         }
     }
 
     function anchorDragEnd (event) {
-        interact(canvas).snap(true);
+        interact(canvas).draggable({ snap: { enabled: true } });
         draggingAnchor = null;
     }
 
@@ -158,23 +170,22 @@
             return;
         }
 
-        interact(canvas).snap({
-            grid: {
-                x: Number(status.gridX.value),
-                y: Number(status.gridY.value)
-            },
-            gridOffset: {
-                x: Number(status.offsetX.value),
-                y: Number(status.offsetY.value)
-            },
-            range: Number(status.range.value)
-        });
+        snapGrid.x = Number(status.gridX.value);
+        snapGrid.y = Number(status.gridY.value);
+        snapGrid.range = Number(status.range.value);
 
-        drawSnap(interact(canvas).snap());
+        snapGrid.offset.x = Number(status.offsetX.value);
+        snapGrid.offset.y = Number(status.offsetY.value);
+
+        if (snapGrid.range < 0) {
+            snapGrid.range = Infinity;
+        }
+
+        drawSnap(interact(canvas).draggable().snap);
     }
 
     function modeChange (event) {
-        var snap = interact(canvas).snap(true).snap();
+        var snap = interact(canvas).draggable().snap;
 
         if (status.anchorDrag.checked && !status.anchorMode.checked) {
             status.anchorMode.checked = true;
@@ -206,15 +217,16 @@
         }
 
         interact(canvas)
-            .snap({
-                mode: status.anchorMode.checked? 'anchor': 'grid',
-                endOnly: status.endOnly.checked
+            .draggable({
+                snap: {
+                    targets: status.gridMode.checked? [gridFunc] : status.anchorMode.checked? anchors : null,
+                    enabled: !status.offMode.checked,
+                    endOnly: status.endOnly.checked
+                }
             })
             .inertia(status.inertia.checked);
 
-        interact(canvas).snap(status.offMode.checked? false: true);
-
-        drawSnap(interact(canvas).snap());
+        drawSnap(interact(canvas).draggable().snap);
     }
 
     function sliderInput (event) {
@@ -237,20 +249,12 @@
         context = canvas.getContext('2d');
 
         interact(canvas)
-            .snap({
-                mode: 'grid',
-                endOnly: true,
-                grid: {x: 0, y: 0},
-                gridOffset: {x: 0, y: 0},
-                range: Infinity,
-                anchors: [
-                    {x: 100, y: 100, range: 200},
-                    {x: 600, y: 400},
-                    {x: 500, y: 150},
-                    {x: 250, y: 250}
-                ]
+            .draggable({
+                restrict: {
+                    enabled: true,
+                    restriction: 'self'
+                }
             })
-            .restrict({drag: 'self'})
             .origin('self')
             .draggable(true);
 
