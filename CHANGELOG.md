@@ -1,16 +1,104 @@
-## Upcoming Changes
+## 1.2.2
+
+### Fixed DOM event removal
+
+See [issue 149](https://github.com/taye/interact.js/issues/149).
+
+## 1.2.1
+
+### Fixed Gestures
+
+Gestures were completely [broken in
+v1.2.0](https://github.com/taye/interact.js/issues/146). They're fixed now.
+
+### Restriction
+
+Fixed restriction to an element when the element doesn't have a rect (`display:
+none`, not in DOM, etc.). [Issue
+144](https://github.com/taye/interact.js/issues/144).
+
+## 1.2.0
+
+### Multiple interactions
+
+Multiple interactions have been enabled by default. For example:
+
+```javascript
+interact('.drag-element').draggable({
+    enabled: true,
+ // max          : Infinity,  // default
+ // maxPerElement: 1,         // default
+});
+```
+
+will allow multiple `.drag-element` to be dragged simultaneously without having
+to explicitly set <code>max:&nbsp;integerGreaterThan1</code>. The default
+`maxPerElement` value is still 1 so only one drag would be able to happen on
+each `.drag-element` unless the `maxPerElement` is changed.
+
+If you don't want multiple interactions, call `interact.maxInteractions(1)`.
 
 ### Snapping
 
+#### Unified snap modes
 Snap modes have been
 [unified](https://github.com/taye/interact.js/pull/127). A `targets` array
 now holds all the snap objects and functions for snapping.
 `interact.createSnapGrid(gridObject)` returns a function that snaps to the
 dimensions of the given grid.
 
+#### `relativePoints` and `origin`
+
+```javascript
+interact(target).draggable({
+  snap: {
+    targets: [ {x: 300, y: 300} ],
+    relativePoints: [
+      { x: 0, y: 0 },  // snap relative to the top left of the element
+      { x: 1, y: 1 },  // and also to the bottom right
+    ],  
+
+    // offset the snap target coordinates
+    // can be an object with x/y or 'startCoords'
+    offset: { x: 50, y: 50 }
+  }
+});
+```
+
+#### snap function interaction arg
+
+The current `Interaction` is now passed as the third parameter to snap functions.
+
+```javascript
+interact(target).draggable({
+  snap: {
+    targets: [ function (x, y, interaction) {
+      if (!interaction.dropTarget) {
+        return { x: 0, y: 0 };
+      }
+    } ]
+  });
+```
+
+#### snap.relativePoints and offset
+
+The `snap.relativePoints` array succeeds the snap.elementOriign object. But
+backwards compatibility with `elementOrigin` and the old snapping interface is
+maintained.
+
+`snap.offset` lets you offset all snap target coords.
+
+See [this PR](https://github.com/taye/interact.js/pull/133) for more info.
+
+#### slight change to snap range calculation
+
 Snapping now occurs if the distance to the snap target is [less than or
 equal](https://github.com/taye/interact.js/commit/430c28c) to the target's
 range.
+
+### Inertia
+
+`inertia.zeroResumeDelta` is now `true` by default.
 
 ### Per-action settings
 
@@ -18,11 +106,9 @@ Snap, restrict, inertia, autoScroll can be different for drag, restrict and
 gesture. See [PR 115](https://github.com/taye/interact.js/pull/115).
 
 Methods for these settings on the `interact` object (`interact.snap()`,
-`interact.autoScroll()`, etc.) [have been
-deprecated](https://github.com/taye/interact.js/issues/94). They will be
-removed in the next minor version change.
+`interact.autoScroll()`, etc.) have been removed.
 
-### Space-separated string and array event list
+### Space-separated string and array event list and eventType:listener object
 
 ```javascript
 function logEventType (event) {
@@ -32,6 +118,11 @@ function logEventType (event) {
 interact(target).on('down tap dragstart gestureend', logEventType);
 
 interact(target).on(['move', 'resizestart'], logEventType);
+
+interact(target).on({
+  dragmove: logEvent,
+  keydown : logEvent
+});
 ```
 
 ### Interactable actionChecker

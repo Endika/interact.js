@@ -1,7 +1,7 @@
 /**
- * interact.js v1.1.3
+ * interact.js v1.2.2
  *
- * Copyright (c) 2012, 2013, 2014 Taye Adeyemi <dev@taye.me>
+ * Copyright (c) 2012-2015 Taye Adeyemi <dev@taye.me>
  * Open source under the MIT License.
  * https://raw.github.com/taye/interact.js/master/LICENSE
  */
@@ -54,7 +54,7 @@
             drag: {
                 enabled: false,
                 manualStart: true,
-                max: 1,
+                max: Infinity,
                 maxPerElement: 1,
 
                 snap: null,
@@ -74,7 +74,7 @@
             resize: {
                 enabled: false,
                 manualStart: false,
-                max: 1,
+                max: Infinity,
                 maxPerElement: 1,
 
                 snap: null,
@@ -89,7 +89,7 @@
             gesture: {
                 manualStart: false,
                 enabled: false,
-                max: 1,
+                max: Infinity,
                 maxPerElement: 1,
 
                 restrict: null
@@ -97,7 +97,7 @@
 
             perAction: {
                 manualStart: false,
-                max: 1,
+                max: Infinity,
                 maxPerElement: 1,
 
                 snap: {
@@ -105,8 +105,9 @@
                     endOnly     : false,
                     range       : Infinity,
                     targets     : null,
+                    offsets     : null,
 
-                    elementOrigin: null
+                    relativePoints: null
                 },
 
                 restrict: {
@@ -127,7 +128,7 @@
                     minSpeed         : 100,   // target speed must be above this for inertia to start
                     endSpeed         : 10,    // the speed at which inertia is slow enough to stop
                     allowResume      : true,  // allow resuming an action in inertia phase
-                    zeroResumeDelta  : false, // if an action is resumed after launch, set dx/dy to 0
+                    zeroResumeDelta  : true,  // if an action is resumed after launch, set dx/dy to 0
                     smoothEndDuration: 300    // animate to snap/restrict endOnly if there's no inertia
                 }
             }
@@ -253,13 +254,20 @@
         prevTouchTime = 0,
 
         // Allow this many interactions to happen simultaneously
-        maxInteractions = 1,
+        maxInteractions = Infinity,
 
-        actionCursors = {
+        // Check if is IE9 or older
+        actionCursors = (document.all && !window.atob) ? {
             drag    : 'move',
             resizex : 'e-resize',
             resizey : 's-resize',
             resizexy: 'se-resize',
+            gesture : ''
+        } : {
+            drag    : 'move',
+            resizex : 'ew-resize',
+            resizey : 'ns-resize',
+            resizexy: 'nwse-resize',
             gesture : ''
         },
 
@@ -1200,7 +1208,7 @@
 
         this.startOffset    = { left: 0, right: 0, top: 0, bottom: 0 };
         this.restrictOffset = { left: 0, right: 0, top: 0, bottom: 0 };
-        this.snapOffset     = { x: 0, y: 0};
+        this.snapOffsets    = [];
 
         this.gesture = {
             start: { x: 0, y: 0 },
@@ -1575,6 +1583,7 @@
 
         setStartOffsets: function (action, interactable, element) {
             var rect = interactable.getRect(element),
+                origin = getOriginXY(interactable, element),
                 snap = interactable.options[this.prepared.name].snap,
                 restrict = interactable.options[this.prepared.name].restrict,
                 width, height;
@@ -1595,12 +1604,25 @@
                 this.startOffset.left = this.startOffset.top = this.startOffset.right = this.startOffset.bottom = 0;
             }
 
-            if (rect && snap.elementOrigin) {
-                this.snapOffset.x = this.startOffset.left - (width  * snap.elementOrigin.x);
-                this.snapOffset.y = this.startOffset.top  - (height * snap.elementOrigin.y);
+            this.snapOffsets.splice(0);
+
+            var snapOffset = snap && snap.offset === 'startCoords'
+                                ? {
+                                    x: this.startCoords.page.x - origin.x,
+                                    y: this.startCoords.page.y - origin.y
+                                }
+                                : snap && snap.offset || { x: 0, y: 0 };
+
+            if (rect && snap && snap.relativePoints && snap.relativePoints.length) {
+                for (var i = 0; i < snap.relativePoints.length; i++) {
+                    this.snapOffsets.push({
+                        x: this.startOffset.left - (width  * snap.relativePoints[i].x) + snapOffset.x,
+                        y: this.startOffset.top  - (height * snap.relativePoints[i].y) + snapOffset.y
+                    });
+                }
             }
             else {
-                this.snapOffset.x = this.snapOffset.y = 0;
+                this.snapOffsets.push(snapOffset);
             }
 
             if (rect && restrict.elementRect) {
@@ -1626,11 +1648,9 @@
          * Use it with interactable.<action>able({ manualStart: false }) to always
          * [start actions manually](https://github.com/taye/interact.js/issues/114)
          *
-         * Simulate pointer down to begin to interact with an interactable element
          - action       (object)  The action to be performed - drag, resize, etc.
          - interactable (Interactable) The Interactable to target
          - element      (Element) The DOM Element to target
-         - pointerEvent (object) #optional Pointer event whose pageX/Y coordinates will be the starting point of the interact drag/resize
          = (object) interact
          **
          | interact(target)
@@ -1812,7 +1832,7 @@
                     var shouldMove = this.setModifications(this.curCoords.page, preEnd);
 
                     // move if snapping or restriction doesn't prevent it
-                    if (shouldMove) {
+                    if (shouldMove || starting) {
                         this.prevEvent = this[this.prepared.name + 'Move'](event);
                     }
 
@@ -2010,7 +2030,7 @@
                 }
 
                 // check if inertia should be started
-                inertiaPossible = (options[this.prepared.name].inertia.enabled
+                inertiaPossible = (inertiaOptions && inertiaOptions.enabled
                                    && this.prepared.name !== 'gesture'
                                    && event !== inertiaStatus.startEvent);
 
@@ -2690,26 +2710,34 @@
             status.realX = page.x;
             status.realY = page.y;
 
-            page.x = page.x - this.inertiaStatus.resumeDx - this.snapOffset.x;
-            page.y = page.y - this.inertiaStatus.resumeDy - this.snapOffset.y;
+            page.x = page.x - this.inertiaStatus.resumeDx;
+            page.y = page.y - this.inertiaStatus.resumeDy;
 
             var len = snap.targets? snap.targets.length : 0;
 
-            for (i = 0; i < len; i++) {
-                target = snap.targets[i];
+            for (var relIndex = 0; relIndex < this.snapOffsets.length; relIndex++) {
+                var relative = {
+                    x: page.x - this.snapOffsets[relIndex].x,
+                    y: page.y - this.snapOffsets[relIndex].y
+                };
 
-                if (isFunction(target)) {
-                    target = target(page.x, page.y);
+                for (i = 0; i < len; i++) {
+                    if (isFunction(snap.targets[i])) {
+                        target = snap.targets[i](relative.x, relative.y, this);
+                    }
+                    else {
+                        target = snap.targets[i];
+                    }
+
+                    if (!target) { continue; }
+
+                    targets.push({
+                        x: isNumber(target.x) ? (target.x + this.snapOffsets[relIndex].x) : relative.x,
+                        y: isNumber(target.y) ? (target.y + this.snapOffsets[relIndex].y) : relative.y,
+
+                        range: isNumber(target.range)? target.range: snap.range
+                    });
                 }
-
-                if (!target) { continue; }
-
-                targets.push({
-                    x: isNumber(target.x) ? target.x : page.x,
-                    y: isNumber(target.y) ? target.y : page.y,
-
-                    range: isNumber(target.range)? target.range: snap.range
-                });
             }
 
             var closest = {
@@ -2841,10 +2869,14 @@
 
             rect = restriction;
 
+            if (!restriction) {
+                restrictedX = page.x;
+                restrictedY = page.y;
+            }
             // object is assumed to have
             // x, y, width, height or
             // left, top, right, bottom
-            if ('x' in restriction && 'y' in restriction) {
+            else if ('x' in restriction && 'y' in restriction) {
                 restrictedX = Math.max(Math.min(rect.x + rect.width  - this.restrictOffset.right , page.x), rect.x + this.restrictOffset.left);
                 restrictedY = Math.max(Math.min(rect.y + rect.height - this.restrictOffset.bottom, page.y), rect.y + this.restrictOffset.top );
             }
@@ -3073,7 +3105,7 @@
         client.x -= origin.x;
         client.y -= origin.y;
 
-        if (checkSnap(target, action) && !(starting && options[action].snap.elementOrigin)) {
+        if (checkSnap(target, action) && !(starting && interaction.snapOffsets.length)) {
             this.snap = {
                 range  : snapStatus.range,
                 locked : snapStatus.locked,
@@ -3557,37 +3589,20 @@
     Interactable.prototype = {
         setOnEvents: function (action, phases) {
             if (action === 'drop') {
-                var drop            = phases.ondrop             || phases.onDrop            || phases.drop,
-                    dropactivate    = phases.ondropactivate     || phases.onDropActivate    || phases.dropactivate
-                                   || phases.onactivate         || phases.onActivate        || phases.activate,
-                    dropdeactivate  = phases.ondropdeactivate   || phases.onDropDeactivate  || phases.dropdeactivate
-                                   || phases.ondeactivate       || phases.onDeactivate      || phases.deactivate,
-                    dragenter       = phases.ondragenter        || phases.onDropEnter       || phases.dragenter
-                                   || phases.onenter            || phases.onEnter           || phases.enter,
-                    dragleave       = phases.ondragleave        || phases.onDropLeave       || phases.dragleave
-                                   || phases.onleave            || phases.onLeave           || phases.leave,
-                    dropmove        = phases.ondropmove         || phases.onDropMove        || phases.dropmove
-                                   || phases.onmove             || phases.onMove            || phases.move;
-
-                if (isFunction(drop)          ) { this.ondrop           = drop          ; }
-                if (isFunction(dropactivate)  ) { this.ondropactivate   = dropactivate  ; }
-                if (isFunction(dropdeactivate)) { this.ondropdeactivate = dropdeactivate; }
-                if (isFunction(dragenter)     ) { this.ondragenter      = dragenter     ; }
-                if (isFunction(dragleave)     ) { this.ondragleave      = dragleave     ; }
-                if (isFunction(dropmove)      ) { this.ondropmove       = dropmove      ; }
+                if (isFunction(phases.ondrop)          ) { this.ondrop           = phases.ondrop          ; }
+                if (isFunction(phases.ondropactivate)  ) { this.ondropactivate   = phases.ondropactivate  ; }
+                if (isFunction(phases.ondropdeactivate)) { this.ondropdeactivate = phases.ondropdeactivate; }
+                if (isFunction(phases.ondragenter)     ) { this.ondragenter      = phases.ondragenter     ; }
+                if (isFunction(phases.ondragleave)     ) { this.ondragleave      = phases.ondragleave     ; }
+                if (isFunction(phases.ondropmove)      ) { this.ondropmove       = phases.ondropmove      ; }
             }
             else {
-                var start        = phases.onstart        || phases.onStart        || phases.start,
-                    move         = phases.onmove         || phases.onMove         || phases.move,
-                    end          = phases.onend          || phases.onEnd          || phases.end,
-                    inertiastart = phases.oninertiastart || phases.onInertiaStart || phases.inertiastart;
-
                 action = 'on' + action;
 
-                if (isFunction(start)       ) { this[action + 'start'         ] = start         ; }
-                if (isFunction(move)        ) { this[action + 'move'          ] = move          ; }
-                if (isFunction(end)         ) { this[action + 'end'           ] = end           ; }
-                if (isFunction(inertiastart)) { this[action + 'inertiastart'  ] = inertiastart  ; }
+                if (isFunction(phases.onstart)       ) { this[action + 'start'         ] = phases.onstart         ; }
+                if (isFunction(phases.onmove)        ) { this[action + 'move'          ] = phases.onmove          ; }
+                if (isFunction(phases.onend)         ) { this[action + 'end'           ] = phases.onend           ; }
+                if (isFunction(phases.oninertiastart)) { this[action + 'inertiastart'  ] = phases.oninertiastart  ; }
             }
 
             return this;
@@ -3616,10 +3631,10 @@
          |     axis: 'x' || 'y' || 'xy',
          |
          |     // max number of drags that can happen concurrently
-         |     // with elements of this Interactable. 1 by default
+         |     // with elements of this Interactable. Infinity by default
          |     max: Infinity,
          |
-         |     // max number of drags that can target the same element
+         |     // max number of drags that can target the same element+Interactable
          |     // 1 by default
          |     maxPerElement: 2
          | });
@@ -3659,7 +3674,7 @@
                         // duplicate the object
                         this.options[action][option] = extend(this.options[action][option] || {}, options[option]);
 
-                        if ('enabled' in defaultOptions.perAction[option]) {
+                        if (isObject(defaultOptions.perAction[option]) && 'enabled' in defaultOptions.perAction[option]) {
                             this.options[action][option].enabled = options[option].enabled === false? false : true;
                         }
                     }
@@ -3684,6 +3699,7 @@
          * Dropzones can receive the following events:
          *  - `dropactivate` and `dropdeactivate` when an acceptable drag starts and ends
          *  - `dragenter` and `dragleave` when a draggable enters and leaves the dropzone
+         *  - `dragmove` when a draggable that has entered the dropzone is moved
          *  - `drop` when a draggable is dropped into this dropzone
          *
          *  Use the `accept` option to allow only elements that match the given CSS selector or element.
@@ -3865,8 +3881,8 @@
          |     axis   : 'x' || 'y' || 'xy' // default is 'xy',
          |
          |     // limit multiple resizes.
-         |     // See the explanation in @Interactable.draggable example
-         |     max: 1,
+         |     // See the explanation in the @Interactable.draggable example
+         |     max: Infinity,
          |     maxPerElement: 1,
          | });
         \*/
@@ -3897,14 +3913,11 @@
             return this.options.resize;
         },
 
-        // misspelled alias
-        resizeable: blank,
-
         /*\
          * Interactable.squareResize
          [ method ]
          *
-         * Deprecated. Add a `square: true|false` property to @Interactable.resizable instead
+         * Deprecated. Add a `square: true || false` property to @Interactable.resizable instead
          *
          * Gets or sets whether resizing is forced 1:1 aspect
          *
@@ -3950,7 +3963,7 @@
          |
          |     // limit multiple gestures.
          |     // See the explanation in @Interactable.draggable example
-         |     max: 1,
+         |     max: Infinity,
          |     maxPerElement: 1,
          | });
         \*/
@@ -3972,30 +3985,34 @@
             return this.options.gesture;
         },
 
-        // misspelled alias
-        gestureable: blank,
-
         /*\
          * Interactable.autoScroll
          [ method ]
+         **
+         * Deprecated. Add an `autoscroll` property to the options object
+         * passed to @Interactable.draggable or @Interactable.resizable instead.
          *
-         * Returns or sets whether or not any actions near the edges of the
+         * Returns or sets whether dragging and resizing near the edges of the
          * window/container trigger autoScroll for this Interactable
          *
-         = (boolean | object)
-         * `false` if autoScroll is disabled; object with autoScroll properties
-         * if autoScroll is enabled
+         = (object) Object with autoScroll properties
          *
          * or
          *
-         - options (object | boolean | null) #optional
+         - options (object | boolean) #optional
          * options can be:
          * - an object with margin, distance and interval properties,
          * - true or false to enable or disable autoScroll or
-         * - null to use default settings
          = (Interactable) this Interactable
         \*/
         autoScroll: function (options) {
+            if (isObject(options)) {
+                options = extend({ actions: ['drag', 'resize']}, options);
+            }
+            else if (isBool(options)) {
+                options = { actions: ['drag', 'resize'], enabled: options };
+            }
+
             return this.setOptions('autoScroll', options);
         },
 
@@ -4003,6 +4020,9 @@
          * Interactable.snap
          [ method ]
          **
+         * Deprecated. Add a `snap` property to the options object passed
+         * to @Interactable.draggable or @Interactable.resizable instead.
+         *
          * Returns or sets if and how action coordinates are snapped. By
          * default, snapping is relative to the pointer coordinates. You can
          * change this by setting the
@@ -4044,19 +4064,23 @@
          |     // immediately before the end event.
          |     endOnly: true,
          |
-         |     // https://github.com/taye/interact.js/pull/72#issue-41813493
-         |     elementOrigin: { x: 0, y: 0 }
+         |     relativePoints: [
+         |         { x: 0, y: 0 },  // snap relative to the top left of the element
+         |         { x: 1, y: 1 },  // and also to the bottom right
+         |     ],  
+         |
+         |     // offset the snap target coordinates
+         |     // can be an object with x/y or 'startCoords'
+         |     offset: { x: 50, y: 50 }
+         |   }
          | });
         \*/
         snap: function (options) {
-            var ret = this.setOptions('snap', options),
-                actions = options && isArray(options.actions)
-                            ? options.actions
-                            : ['drag'];
+            var ret = this.setOptions('snap', options);
 
             if (ret === this) { return this; }
 
-            return ret[actions[0]];
+            return ret.drag;
         },
 
         setOptions: function (option, options) {
@@ -4068,7 +4092,7 @@
 
             if (isObject(options) || isBool(options)) {
                 for (i = 0; i < actions.length; i++) {
-                    var action = actions[i];
+                    var action = /resize/.test(actions[i])? 'resize' : actions[i];
 
                     if (!isObject(this.options[action])) { continue; }
 
@@ -4092,9 +4116,13 @@
                             else if (thisOption.mode === 'path') {
                                 thisOption.targets = thisOption.paths;
                             }
+
+                            if ('elementOrigin' in options) {
+                                thisOption.relativePoints = [options.elementOrigin];
+                            }
                         }
                     }
-                    else {
+                    else if (isBool(options)) {
                         thisOption.enabled = options;
                     }
                 }
@@ -4119,6 +4147,9 @@
          * Interactable.inertia
          [ method ]
          **
+         * Deprecated. Add an `inertia` property to the options object passed
+         * to @Interactable.draggable or @Interactable.resizable instead.
+         *
          * Returns or sets if and how events continue to run after the pointer is released
          **
          = (boolean | object) `false` if inertia is disabled; `object` with inertia properties if inertia is enabled
@@ -4162,7 +4193,11 @@
          | interact(element).inertia(null);
         \*/
         inertia: function (options) {
-            return this.setOptions('inertia', options);
+            var ret = this.setOptions('inertia', options);
+
+            if (ret === this) { return this; }
+
+            return ret.drag;
         },
 
         getAction: function (pointer, interaction, element) {
@@ -4217,7 +4252,7 @@
          * The default function to get an Interactables bounding rect. Can be
          * overridden using @Interactable.rectChecker.
          *
-         - element (Element) #optional The element to measure. Meant to be used for selector Interactables which don't have a specific element.
+         - element (Element) #optional The element to measure.
          = (object) The object's bounding rectangle.
          o {
          o     top   : 0,
@@ -4368,6 +4403,9 @@
          * Interactable.restrict
          [ method ]
          **
+         * Deprecated. Add a `restrict` property to the options object passed to
+         * @Interactable.draggable, @Interactable.resizable or @Interactable.gesturable instead.
+         *
          * Returns or sets the rectangles within which actions on this
          * interactable (after snap calculations) are restricted. By default,
          * restricting is relative to the pointer coordinates. You can change
@@ -4426,7 +4464,7 @@
          * Interactable.context
          [ method ]
          *
-         * Get's the selector context Node of the Interactable. The default is `window.document`.
+         * Gets the selector context Node of the Interactable. The default is `window.document`.
          *
          = (Node) The context Node of this Interactable
          **
@@ -4563,7 +4601,7 @@
          *
          * Binds a listener for an InteractEvent or DOM event.
          *
-         - eventType  (string | array) The types of events to listen for
+         - eventType  (string | array | object) The types of events to listen for
          - listener   (function) The function to be called on the given event(s)
          - useCapture (boolean) #optional useCapture flag for addEventListener
          = (object) This Interactable
@@ -4578,6 +4616,14 @@
             if (isArray(eventType)) {
                 for (i = 0; i < eventType.length; i++) {
                     this.on(eventType[i], listener, useCapture);
+                }
+
+                return this;
+            }
+
+            if (isObject(eventType)) {
+                for (var prop in eventType) {
+                    interact.on(prop, eventType[prop], listener);
                 }
 
                 return this;
@@ -4649,7 +4695,7 @@
          *
          * Removes an InteractEvent or DOM event listener
          *
-         - eventType  (string | array) The types of events that were listened for
+         - eventType  (string | array | object) The types of events that were listened for
          - listener   (function) The listener function to be removed
          - useCapture (boolean) #optional useCapture flag for removeEventListener
          = (object) This Interactable
@@ -4664,6 +4710,14 @@
             if (isArray(eventType)) {
                 for (i = 0; i < eventType.length; i++) {
                     this.off(eventType[i], listener, useCapture);
+                }
+
+                return this;
+            }
+
+            if (isObject(eventType)) {
+                for (var prop in eventType) {
+                    interact.off(prop, eventType[prop], listener);
                 }
 
                 return this;
@@ -4741,7 +4795,7 @@
             }
             // remove listener from this Interatable's element
             else {
-                events.remove(this, listener, useCapture);
+                events.remove(this._element, eventType, listener, useCapture);
             }
 
             return this;
@@ -4849,8 +4903,27 @@
         }
     };
 
-    Interactable.prototype.gestureable = Interactable.prototype.gesturable;
-    Interactable.prototype.resizeable = Interactable.prototype.resizable;
+    function warnOnce (method, message) {
+        var warned = false;
+
+        return function () {
+            if (!warned) {
+                window.console.warn(message);
+                warned = true;
+            }
+
+            return method.apply(this, arguments);
+        };
+    }
+
+    Interactable.prototype.snap = warnOnce(Interactable.prototype.snap,
+         'Interactable#snap is deprecated. See the new documentation for snapping at http://interactjs.io/docs/#snap');
+    Interactable.prototype.restrict = warnOnce(Interactable.prototype.restrict,
+         'Interactable#restrict is deprecated. See the new documentation for resticting at http://interactjs.io/docs/#restrict');
+    Interactable.prototype.inertia = warnOnce(Interactable.prototype.inertia,
+         'Interactable#inertia is deprecated. See the new documentation for inertia at http://interactjs.io/docs/#inertia');
+    Interactable.prototype.autoScroll = warnOnce(Interactable.prototype.autoScroll,
+         'Interactable#autoScroll is deprecated. See the new documentation for autoScroll at http://interactjs.io/docs/#autoscroll');
 
     /*\
      * interact.isSet
@@ -4871,7 +4944,7 @@
      * Adds a global listener for an InteractEvent or adds a DOM event to
      * `document`
      *
-     - type       (string | array) The types of events to listen for
+     - type       (string | array | object) The types of events to listen for
      - listener   (function) The function to be called on the given event(s)
      - useCapture (boolean) #optional useCapture flag for addEventListener
      = (object) interact
@@ -4884,6 +4957,14 @@
         if (isArray(type)) {
             for (var i = 0; i < type.length; i++) {
                 interact.on(type[i], listener, useCapture);
+            }
+
+            return interact;
+        }
+
+        if (isObject(type)) {
+            for (var prop in type) {
+                interact.on(prop, type[prop], listener);
             }
 
             return interact;
@@ -4913,7 +4994,7 @@
      *
      * Removes a global InteractEvent listener or DOM event from `document`
      *
-     - type       (string | array) The types of events that were listened for
+     - type       (string | array | object) The types of events that were listened for
      - listener   (function) The listener function to be removed
      - useCapture (boolean) #optional useCapture flag for removeEventListener
      = (object) interact
@@ -4926,6 +5007,14 @@
         if (isArray(type)) {
             for (var i = 0; i < type.length; i++) {
                 interact.off(type[i], listener, useCapture);
+            }
+
+            return interact;
+        }
+
+        if (isObject(type)) {
+            for (var prop in type) {
+                interact.off(prop, type[prop], listener);
             }
 
             return interact;
@@ -4947,108 +5036,64 @@
     };
 
     /*\
-     * interact.simulate
-     [ method ]
-     *
-     * Deprecated. You probably want @Interactable.fire @Interaction.start
-     *
-     * Simulate pointer down to begin to interact with an interactable element
-     - action       (string)  The action to be performed - drag, resize, etc.
-     - element      (Element) The DOM Element to resize/drag
-     - pointerEvent (object) #optional Pointer event whose pageX/Y coordinates will be the starting point of the interact drag/resize
-     = (object) interact
-    \*/
-    interact.simulate = function (action, element, pointerEvent) {
-        var event = {},
-            clientRect;
-
-        if (action === 'resize') {
-            action = 'resizexy';
-        }
-        // return if the action is not recognised
-        if (!/^(drag|resizexy|resizex|resizey)$/.test(action)) {
-            return interact;
-        }
-
-        if (pointerEvent) {
-            extend(event, pointerEvent);
-        }
-        else {
-            clientRect = (element instanceof SVGElement)
-                ? element.getBoundingClientRect()
-                : clientRect = element.getClientRects()[0];
-
-            if (action === 'drag') {
-                event.pageX = clientRect.left + clientRect.width / 2;
-                event.pageY = clientRect.top + clientRect.height / 2;
-            }
-            else {
-                event.pageX = clientRect.right;
-                event.pageY = clientRect.bottom;
-            }
-        }
-
-        event.target = event.currentTarget = element;
-        event.preventDefault = event.stopPropagation = blank;
-
-        listeners.pointerDown(event, action);
-
-        return interact;
-    };
-
-    /*\
      * interact.enableDragging
      [ method ]
+     *
+     * Deprecated.
      *
      * Returns or sets whether dragging is enabled for any Interactables
      *
      - newValue (boolean) #optional `true` to allow the action; `false` to disable action for all Interactables
      = (boolean | object) The current setting or interact
     \*/
-    interact.enableDragging = function (newValue) {
+    interact.enableDragging = warnOnce(function (newValue) {
         if (newValue !== null && newValue !== undefined) {
             actionIsEnabled.drag = newValue;
 
             return interact;
         }
         return actionIsEnabled.drag;
-    };
+    }, 'interact.enableDragging is deprecated and will soon be removed.');
 
     /*\
      * interact.enableResizing
      [ method ]
+     *
+     * Deprecated.
      *
      * Returns or sets whether resizing is enabled for any Interactables
      *
      - newValue (boolean) #optional `true` to allow the action; `false` to disable action for all Interactables
      = (boolean | object) The current setting or interact
     \*/
-    interact.enableResizing = function (newValue) {
+    interact.enableResizing = warnOnce(function (newValue) {
         if (newValue !== null && newValue !== undefined) {
             actionIsEnabled.resize = newValue;
 
             return interact;
         }
         return actionIsEnabled.resize;
-    };
+    }, 'interact.enableResizing is deprecated and will soon be removed.');
 
     /*\
      * interact.enableGesturing
      [ method ]
+     *
+     * Deprecated.
      *
      * Returns or sets whether gesturing is enabled for any Interactables
      *
      - newValue (boolean) #optional `true` to allow the action; `false` to disable action for all Interactables
      = (boolean | object) The current setting or interact
     \*/
-    interact.enableGesturing = function (newValue) {
+    interact.enableGesturing = warnOnce(function (newValue) {
         if (newValue !== null && newValue !== undefined) {
             actionIsEnabled.gesture = newValue;
 
             return interact;
         }
         return actionIsEnabled.gesture;
-    };
+    }, 'interact.enableGesturing is deprecated and will soon be removed.');
 
     interact.eventTypes = eventTypes;
 
@@ -5142,153 +5187,6 @@
     };
 
     /*\
-     * interact.styleCursor
-     [ styleCursor ]
-     *
-     * Deprecated. Use @Interactable.styleCursor instead.
-     *
-     * Returns or sets whether the cursor style of the document is changed
-     * depending on what action is being performed
-     *
-     - newValue (boolean) #optional
-     = (boolean | interact) The current setting of interact
-    \*/
-    interact.styleCursor = function (newValue) {
-        if (isBool(newValue)) {
-            defaultOptions.styleCursor = newValue;
-
-            return interact;
-        }
-        return defaultOptions.styleCursor;
-    };
-
-    /*\
-     * interact.autoScroll
-     [ method ]
-     *
-     * Deprecated. Use @Interactable.autoScroll instead.
-     *
-     * Returns or sets whether or not actions near the edges of the window or
-     * specified container element trigger autoScroll by default
-     *
-     - options (boolean | object) true or false to simply enable or disable or an object with margin, distance, container and interval properties
-     = (object) interact
-     * or
-     = (boolean | object) `false` if autoscroll is disabled and the default autoScroll settings if it is enabled
-    \*/
-    interact.autoScroll = function (options) {
-        var defaults = defaultOptions.perAction.autoScroll;
-
-        if (isObject(options)) {
-            defaultOptions.autoScroll.enabled = true;
-
-            if (isNumber(options.margin)) { defaults.margin = options.margin;}
-            if (isNumber(options.speed) ) { defaults.speed  = options.speed ;}
-
-            defaults.container =
-                (isElement(options.container) || isWindow(options.container)
-                 ? options.container
-                 : defaults.container);
-
-            return interact;
-        }
-
-        if (isBool(options)) {
-            defaultOptions.autoScroll.enabled = options;
-
-            return interact;
-        }
-
-        // return the autoScroll settings if autoScroll is enabled
-        // otherwise, return false
-        return defaultOptions.autoScroll.enabled? defaults: false;
-    };
-
-    /*\
-     * interact.snap
-     [ method ]
-     *
-     * Deprecated. Use @Interactable.snap instead.
-     *
-     * Returns or sets whether actions are constrained to a grid or a
-     * collection of coordinates
-     *
-     - options (boolean | object) #optional New settings
-     * `true` or `false` to simply enable or disable
-     * or an object with some of the following properties
-     *
-     = (object | interact) The default snap settings object or interact
-    \*/
-    interact.snap = function (options) {
-        var snap = defaultOptions.perAction.snap;
-
-        if (isObject(options)) {
-            defaultOptions.snap.enabled = true;
-
-            if (isString(options.mode)         ) { snap.mode          = options.mode;          }
-            if (isBool  (options.endOnly)      ) { snap.endOnly       = options.endOnly;       }
-            if (isNumber(options.range)        ) { snap.range         = options.range;         }
-            if (isArray (options.targets)      ) { snap.targets       = options.targets;       }
-            if (isObject(options.grid)         ) { snap.grid          = options.grid;          }
-            if (isObject(options.gridOffset)   ) { snap.gridOffset    = options.gridOffset;    }
-            if (isObject(options.elementOrigin)) { snap.elementOrigin = options.elementOrigin; }
-
-            return interact;
-        }
-        if (isBool(options)) {
-            defaultOptions.snap.enabled = options;
-
-            return interact;
-        }
-
-        return defaultOptions.snap.enabled;
-    };
-
-    /*\
-     * interact.inertia
-     [ method ]
-     *
-     * Deprecated. Use @Interactable.inertia instead.
-     *
-     * Returns or sets inertia settings.
-     *
-     - options (boolean | object) #optional New settings
-     * `true` or `false` to simply enable or disable
-     * or an object of inertia options
-     = (object | interact) The default inertia settings object or interact
-    \*/
-    interact.inertia = function (options) {
-        var inertia = defaultOptions.perAction.inertia;
-
-        if (isObject(options)) {
-            defaultOptions.inertia.enabled = true;
-
-            if (isNumber(options.resistance)       ) { inertia.resistance        = options.resistance       ; }
-            if (isNumber(options.minSpeed)         ) { inertia.minSpeed          = options.minSpeed         ; }
-            if (isNumber(options.endSpeed)         ) { inertia.endSpeed          = options.endSpeed         ; }
-            if (isNumber(options.smoothEndDuration)) { inertia.smoothEndDuration = options.smoothEndDuration; }
-            if (isBool  (options.allowResume)      ) { inertia.allowResume       = options.allowResume      ; }
-            if (isBool  (options.zeroResumeDelta)  ) { inertia.zeroResumeDelta   = options.zeroResumeDelta  ; }
-
-            return interact;
-        }
-        if (isBool(options)) {
-            defaultOptions.inertia.enabled = options;
-
-            return interact;
-        }
-
-        return {
-            enabled: inertia.enabled,
-            resistance: inertia.resistance,
-            minSpeed: inertia.minSpeed,
-            endSpeed: inertia.endSpeed,
-            allowResume: inertia.allowResume,
-            zeroResumeDelta: inertia.zeroResumeDelta
-        };
-    };
-
-    /*\
      * interact.supportsTouch
      [ method ]
      *
@@ -5306,24 +5204,6 @@
     \*/
     interact.supportsPointerEvent = function () {
         return supportsPointerEvent;
-    };
-
-    /*\
-     * interact.currentAction
-     [ method ]
-     *
-     * Deprecated
-     *
-     = (string) What action is currently being performed
-    \*/
-    interact.currentAction = function () {
-        for (var i = 0, len = interactions.length; i < len; i++) {
-            var action = interactions[i].currentAction();
-
-            if (action) { return action; }
-        }
-
-        return null;
     };
 
     /*\
@@ -5365,78 +5245,6 @@
             return interact;
         }
         return dynamicDrop;
-    };
-
-    /*\
-     * interact.deltaSource
-     [ method ]
-     *
-     * Deprecated. Use @Interactable.deltaSource instead.
-     *
-     * Returns or sets weather pageX/Y or clientX/Y is used to calculate dx/dy.
-     *
-     - newValue (string) #optional 'page' or 'client'
-     = (string | Interactable) The current setting or interact
-    \*/
-    interact.deltaSource = function (newValue) {
-        if (newValue === 'page' || newValue === 'client') {
-            defaultOptions.deltaSource = newValue;
-
-            return this;
-        }
-        return defaultOptions.deltaSource;
-    };
-
-
-    /*\
-     * interact.restrict
-     [ method ]
-     *
-     * Deprecated. Use @Interactable.restrict instead.
-     *
-     * Returns or sets the default rectangles within which actions (after snap
-     * calculations) are restricted.
-     *
-     - newValue (object) #optional an object with keys drag, resize, and/or gesture and rects or Elements as values
-     = (object) The current restrictions object or interact
-    \*/
-    interact.restrict = function (newValue) {
-        var defaults = defaultOptions.perAction.restrict;
-
-        if (newValue === undefined) {
-            return defaultOptions.restrict;
-        }
-
-        if (isBool(newValue)) {
-            defaultOptions.restrict.enabled = newValue;
-        }
-        else if (isObject(newValue)) {
-            if (isObject(newValue.drag) || /^parent$|^self$/.test(newValue.drag)) {
-                defaults.drag = newValue.drag;
-            }
-            if (isObject(newValue.resize) || /^parent$|^self$/.test(newValue.resize)) {
-                defaults.resize = newValue.resize;
-            }
-            if (isObject(newValue.gesture) || /^parent$|^self$/.test(newValue.gesture)) {
-                defaults.gesture = newValue.gesture;
-            }
-
-            if (isBool(newValue.endOnly)) {
-                defaults.endOnly = newValue.endOnly;
-            }
-
-            if (isObject(newValue.elementRect)) {
-                defaults.elementRect = newValue.elementRect;
-            }
-
-            defaultOptions.restrict.enabled = true;
-        }
-        else if (newValue === null) {
-           defaults.drag = defaults.resize = defaults.gesture = null;
-           defaults.endOnly = false;
-        }
-
-        return this;
     };
 
     /*\

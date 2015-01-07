@@ -1,6 +1,9 @@
-<a href="http://interactjs.io"><img alt="interact.js" src="http://interactjs.io/repo/img/ijs-anim.svg" height="131px" width="100%"></a>
+<a href="http://interactjs.io"><img alt="interact.js" src="https://c4d6f7d727e094887e93-4ea74b676357550bd514a6a5b344c625.ssl.cf2.rackcdn.com/ijs-anim.svg" height="131px" width="100%"></a>
 
-Javascript drag and drop, resizing and gestures for modern desktop and mobile browsers.
+JavaScript drag and drop, resizing and multi-touch gestures with inertia and
+snapping for modern browsers (and also IE8+).
+
+[![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/taye/interact.js)
 
 Features include:
 
@@ -10,24 +13,18 @@ Features include:
    Chrome, Firefox and Opera as well as **Internet Explorer 8+**
  - interaction with [**SVG**](http://interactjs.io/repo/demo/star.svg) elements
  - being **lightweight and standalone** (not _yet another_ jQuery plugin)
- - **not modifying anything** it doesn't own (except to support IE8 and to
-   change the cursor (but you can disable that))
-
-## This README features [changes][upcoming-changes] that are currently in development.
-
-The README of the latest release can be found [here][latest-readme].
-
-Follow [@interactjs][ijs-twitter] on twitter and keep an eye on the [CHANGELOG](CHANGELOG.md) to stay updated.
+ - **not modifying the DOM** except to support IE8 and to change the cursor
+   (but you can disable that)
 
 Installation
 ------------
 
-Install with [Bower](http://bower.io/) or [npm](https://www.npmjs.org/) or download the latest version from http://interactjs.io/#download.
-
-```shell
-    $ bower install interact
-    $ npm install interact.js
-```
+* [Bower](http://bower.io/): `bower install interact`
+* [npm](https://www.npmjs.org/): `npm install interact.js`
+* Direct download the latest version: http://interactjs.io/#download
+* [jsDelivr CDN](http://www.jsdelivr.com/#!interact.js): `<script src="//cdn.jsdelivr.net/interact.js/VERSION/interact.min.js"></script>`
+* [cdnjs CDN](https://cdnjs.com/libraries/interact.js): `<script src="//cdnjs.cloudflare.com/ajax/libs/interact.js/VERSION/interact.min.js"></script>` 
+  (replace `VERSION` with the SemVer you want to use)
 
 Documentation
 -------------
@@ -95,4 +92,3 @@ interact.js is released under the [MIT License](http://taye.mit-license.org).
 
 [ijs-twitter]: https://twitter.com/interactjs
 [upcoming-changes]: https://github.com/taye/interact.js/blob/master/CHANGELOG.md#upcoming-changes
-[latest-readme]: https://github.com/taye/interact.js/blob/latest/README.md#readme
