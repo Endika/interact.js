@@ -1,3 +1,87 @@
+## Upcomming Changes
+
+### Added `event` parameters to actionCheckers and dropCheckers
+
+See commits 88dc583df6df3c44bdd63cb8d17e41971594e2ed and 16d74d433fa6275d5bfa13ac8672b4a4aa33216a
+
+### Fixed autoScroll for mobile
+
+See #180
+
+### Merged [#183](https://github.com/taye/interact.js/pull/183) to fix an occasional bug
+
+### Improved auto preventDefault
+
+See commits 1984c805689ec44b9c525a3fc7b6b7253140d583 and 69139592963a15d6b6be910b5969d133418fa6ae
+
+### Fixed Interaction#unset
+
+See [PR #178](https://github.com/taye/interact.js/pull/178)
+
+### Fix coords of start event after manual start
+
+Commit fec73b2a017cabbdc42b381efbc28e658d9a0239
+
+### Added resize.margin
+
+See https://github.com/taye/interact.js/issues/166#issuecomment-91234390
+
+### Fixed a bug with touch and selector interactables
+
+See https://gitter.im/taye/interact.js?at=5523d1d92435c9553cf6d3b4
+
+
+### Fixed a touch doubletap bug
+
+See https://gitter.im/taye/interact.js?at=551e4b2faf9675d135ab346d
+
+Add origin subtract for X0 and Y0 [#167](https://github.com/taye/interact.js/pull/145)
+
+## 1.2.4
+
+### Resizing from all edges
+
+With the new [resize edges API](https://github.com/taye/interact.js/pull/145),
+you can resize from the top and left edges of an element in addition to the
+bottom and right. It also allows you to specify CSS selectors, regions or
+elements as the resize handles.
+
+### Better `dropChecker` arguments
+
+The arguments to `dropChecker` functions have been expanded to include the
+value of the default drop check and some other useful objects. See [PR
+161](https://github.com/taye/interact.js/pull/161)
+
+### Improved `preventDefault('auto')`
+
+If manuanStart is `true`, default prevention will happen only while
+interacting. Related to [Issue
+138](https://github.com/taye/interact.js/issues/138).
+
+### Fixed inaccurate snapping
+
+This removes a small inaccuracy when snapping with one or more
+`relativeOffsets`.
+
+### Fixed bugs with multiple pointers
+
+## 1.2.3
+
+### ShadowDOM
+
+Basic support for ShadowDOM was implemented in [PR
+143](https://github.com/taye/interact.js/pull/143)
+
+### Fixed some issues with events
+
+Fixed Interactable#on({ type: listener }). b8a5e89
+
+Added a `double` property to tap events. `tap.double === true` if the tap will
+be followed by a `doubletap` event. See [issue
+155](https://github.com/taye/interact.js/issues/155#issuecomment-71202352).
+
+Fixed [issue 150](https://github.com/taye/interact.js/issues/150).
+
 ## 1.2.2
 
 ### Fixed DOM event removal
