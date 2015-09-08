@@ -83,7 +83,7 @@
                 inertia: null,
                 autoScroll: null,
 
-                axis: 'xy',
+                axis: 'xy'
             },
 
             drop: {
@@ -321,10 +321,9 @@
             supportsTouch &&
             navigator.userAgent.match('Presto'),
 
-        // scrolling doesn't change the result of
-        // getBoundingClientRect/getClientRects on iOS <=7 but it does on iOS 8
-        isIOS7orLower = (/iP(hone|od|ad)/.test(navigator.platform)
-                            && /OS [1-7][^\d]/.test(navigator.appVersion)),
+        // scrolling doesn't change the result of getClientRects on iOS 7
+        isIOS7 = (/iP(hone|od|ad)/.test(navigator.platform)
+                         && /OS 7[^\d]/.test(navigator.appVersion)),
 
         // prefix matchesSelector
         prefixedMatchesSelector = 'matches' in Element.prototype?
@@ -714,7 +713,7 @@
     function getElementRect (element) {
         var clientRect = getElementClientRect(element);
 
-        if (!isIOS7orLower && clientRect) {
+        if (!isIOS7 && clientRect) {
             var scroll = getScrollXY(getWindow(element));
 
             clientRect.left   += scroll.x;
@@ -3366,6 +3365,7 @@
         this.shiftKey  = event.shiftKey;
         this.metaKey   = event.metaKey;
         this.button    = event.button;
+        this.buttons   = event.buttons;
         this.target    = element;
         this.t0        = interaction.downTimes[0];
         this.type      = action + (phase || '');
@@ -4038,6 +4038,9 @@
                 else if (isNumber(options.overlap)) {
                     this.options.drop.overlap = Math.max(Math.min(1, options.overlap), 0);
                 }
+                if ('checker' in options) {
+                  this.options.drop.checker = options.checker;
+                }
 
                 return this;
             }
@@ -4057,8 +4060,8 @@
             // if the dropzone has no rect (eg. display: none)
             // call the custom dropChecker or just return false
             if (!(rect = rect || this.getRect(dropElement))) {
-                return (this.options.dropChecker
-                    ? this.options.dropChecker(pointer, event, dropped, this, dropElement, draggable, draggableElement)
+                return (this.options.drop.checker
+                    ? this.options.drop.checker(pointer, event, dropped, this, dropElement, draggable, draggableElement)
                     : false);
             }
 
@@ -4096,8 +4099,8 @@
                 dropped = overlapRatio >= dropOverlap;
             }
 
-            if (this.options.dropChecker) {
-                dropped = this.options.dropChecker(pointer, dropped, this, dropElement, draggable, draggableElement);
+            if (this.options.drop.checker) {
+                dropped = this.options.drop.checker(pointer, event, dropped, this, dropElement, draggable, draggableElement);
             }
 
             return dropped;
@@ -4106,6 +4109,8 @@
         /*\
          * Interactable.dropChecker
          [ method ]
+         *
+         * DEPRECATED. Use interactable.dropzone({ checker: function... }) instead.
          *
          * Gets or sets the function used to check if a dragged element is
          * over this Interactable.
@@ -4138,7 +4143,7 @@
         \*/
         dropChecker: function (checker) {
             if (isFunction(checker)) {
-                this.options.dropChecker = checker;
+                this.options.drop.checker = checker;
 
                 return this;
             }
@@ -4148,7 +4153,7 @@
                 return this;
             }
 
-            return this.options.dropChecker;
+            return this.options.drop.checker;
         },
 
         /*\
@@ -5186,7 +5191,7 @@
             var settings = [
                     'accept', 'actionChecker', 'allowFrom', 'deltaSource',
                     'dropChecker', 'ignoreFrom', 'origin', 'preventDefault',
-                    'rectChecker'
+                    'rectChecker', 'styleCursor'
                 ];
 
             for (i = 0, len = settings.length; i < len; i++) {
@@ -5278,6 +5283,11 @@
          'Interactable#autoScroll is deprecated. See the new documentation for autoScroll at http://interactjs.io/docs/#autoscroll');
     Interactable.prototype.squareResize = warnOnce(Interactable.prototype.squareResize,
          'Interactable#squareResize is deprecated. See http://interactjs.io/docs/#resize-square');
+
+    Interactable.prototype.accept = warnOnce(Interactable.prototype.accept,
+         'Interactable#accept is deprecated. use Interactable#dropzone({ accept: target }) instead');
+    Interactable.prototype.dropChecker = warnOnce(Interactable.prototype.dropChecker,
+         'Interactable#dropChecker is deprecated. use Interactable#dropzone({ dropChecker: checkerFunction }) instead');
 
     /*\
      * interact.isSet
@@ -5518,9 +5528,10 @@
     interact.getTouchDistance = touchDistance;
     interact.getTouchAngle    = touchAngle;
 
-    interact.getElementRect   = getElementRect;
-    interact.matchesSelector  = matchesSelector;
-    interact.closest          = closest;
+    interact.getElementRect         = getElementRect;
+    interact.getElementClientRect   = getElementClientRect;
+    interact.matchesSelector        = matchesSelector;
+    interact.closest                = closest;
 
     /*\
      * interact.margin
@@ -5572,7 +5583,7 @@
      = (object) interact
     \*/
     interact.stop = function (event) {
-        for (var i = interactions.length - 1; i > 0; i--) {
+        for (var i = interactions.length - 1; i >= 0; i--) {
             interactions[i].stop(event);
         }
 
@@ -5742,6 +5753,21 @@
         catch (error) {
             interact.windowParentError = error;
         }
+
+        // prevent native HTML5 drag on interact.js target elements
+        events.add(doc, 'dragstart', function (event) {
+            for (var i = 0; i < interactions.length; i++) {
+                var interaction = interactions[i];
+
+                if (interaction.element
+                    && (interaction.element === event.target
+                        || nodeContains(interaction.element, event.target))) {
+
+                    interaction.checkAndPreventDefault(event, interaction.target, interaction.element);
+                    return;
+                }
+            }
+        });
 
         if (events.useAttachEvent) {
             // For IE's lack of Event#preventDefault
