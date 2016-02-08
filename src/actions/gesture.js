@@ -1,18 +1,13 @@
-const base = require('./base');
-const utils = require('../utils');
-const InteractEvent = require('../InteractEvent');
-const Interactable = require('../Interactable');
-const Interaction = require('../Interaction');
-const scope = require('../scope');
+const actions        = require('./index');
+const utils          = require('../utils');
+const InteractEvent  = require('../InteractEvent');
+const Interactable   = require('../Interactable');
+const Interaction    = require('../Interaction');
 const defaultOptions = require('../defaultOptions');
 
 const gesture = {
   defaults: {
-    manualStart  : false,
-    enabled      : false,
-    max          : Infinity,
-    maxPerElement: 1,
-
+    enabled : false,
     restrict: null,
   },
 
@@ -29,7 +24,9 @@ const gesture = {
   },
 };
 
-Interaction.signals.on('start-gesture', function ({ interaction, event }) {
+Interaction.signals.on('action-start', function ({ interaction, event }) {
+  if (interaction.prepared.name !== 'gesture') { return; }
+
   const gestureEvent = new InteractEvent(interaction, event, 'gesture', 'start', interaction.element);
 
   gestureEvent.ds = 0;
@@ -44,10 +41,8 @@ Interaction.signals.on('start-gesture', function ({ interaction, event }) {
   interaction.prevEvent = gestureEvent;
 });
 
-Interaction.signals.on('move-gesture', function ({ interaction, event }) {
-  if (!interaction.pointerIds.length) {
-    return interaction.prevEvent;
-  }
+Interaction.signals.on('action-move', function ({ interaction, event }) {
+  if (interaction.prepared.name !== 'gesture') { return; }
 
   let gestureEvent;
 
@@ -68,9 +63,14 @@ Interaction.signals.on('move-gesture', function ({ interaction, event }) {
   }
 
   interaction.prevEvent = gestureEvent;
+
+  // if the action was ended in a gesturemove listener
+  if (!interaction.interacting()) { return false; }
 });
 
-Interaction.signals.on('end-gesture', function ({ interaction, event }) {
+Interaction.signals.on('action-end', function ({ interaction, event }) {
+  if (interaction.prepared.name !== 'gesture') { return; }
+
   const gestureEvent = new InteractEvent(interaction, event, 'gesture', 'end', interaction.element);
 
   interaction.target.fire(gestureEvent);
@@ -118,10 +118,9 @@ Interactable.prototype.gesturable = function (options) {
   return this.options.gesture;
 };
 
-InteractEvent.signals.on('gesture', function (arg) {
-  if (arg.action !== 'gesture') { return; }
+InteractEvent.signals.on('set-delta', function ({ interaction, iEvent, action, event, starting, ending, deltaSource }) {
+  if (action !== 'gesture') { return; }
 
-  const { interaction, iEvent, starting, ending, deltaSource } = arg;
   const pointers = interaction.pointers;
 
   iEvent.touches = [pointers[0], pointers[1]];
@@ -168,15 +167,14 @@ Interaction.signals.on('new', function (interaction) {
   };
 });
 
-base.gesture = gesture;
-base.names.push('gesture');
-utils.merge(scope.eventTypes, [
+actions.gesture = gesture;
+actions.names.push('gesture');
+utils.merge(Interactable.eventTypes, [
   'gesturestart',
   'gesturemove',
-  'gestureinertiastart',
   'gestureend',
 ]);
-base.methodDict.gesture = 'gesturable';
+actions.methodDict.gesture = 'gesturable';
 
 defaultOptions.gesture = gesture.defaults;
 

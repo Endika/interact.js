@@ -4,7 +4,7 @@ const domObjects = require('./domObjects');
 
 const browser = {
   // Does the browser support touch input?
-  supportsTouch: !!(('ontouchstart' in win.window) || win.window.DocumentTouch
+  supportsTouch: !!(('ontouchstart' in win.window) || isType.isFunction(win.window.DocumentTouch)
                      && domObjects.document instanceof win.DocumentTouch),
 
   // Does the browser support PointerEvents
@@ -39,6 +39,10 @@ const browser = {
       : { up: 'pointerup', down: 'pointerdown', over: 'pointerover',
           out: 'pointerout', move: 'pointermove', cancel: 'pointercancel' })
     : null),
+
+  // because Webkit and Opera still use 'mousewheel' event type
+  wheelEvent: 'onmousewheel' in domObjects.document? 'mousewheel': 'wheel',
+
 };
 
 browser.useMatchesSelectorPolyfill = !isType.isFunction(Element.prototype[browser.prefixedMatchesSelector]);

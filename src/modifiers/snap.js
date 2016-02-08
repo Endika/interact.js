@@ -1,6 +1,6 @@
-const modifiers = require('./base');
-const interact = require('../interact');
-const utils = require('../utils');
+const modifiers      = require('./index');
+const interact       = require('../interact');
+const utils          = require('../utils');
 const defaultOptions = require('../defaultOptions');
 
 const snap = {
@@ -25,15 +25,26 @@ const snap = {
   setOffset: function (interaction, interactable, element, rect, startOffset) {
     const offsets = [];
     const origin = utils.getOriginXY(interactable, element);
-    const snapOptions = interactable.options[interaction.prepared.name].snap;
-    const snapOffset = (snapOptions && snapOptions.offset === 'startCoords'
-      ? {
+    const snapOptions = interactable.options[interaction.prepared.name].snap || {};
+    let snapOffset;
+
+    if (snapOptions.offset === 'startCoords') {
+      snapOffset = {
         x: interaction.startCoords.page.x - origin.x,
         y: interaction.startCoords.page.y - origin.y,
-      }
-      : snapOptions && snapOptions.offset || { x: 0, y: 0 });
+      };
+    }
+    else if (snapOptions.offset === 'self') {
+      snapOffset = {
+        x: rect.left - origin.x,
+        y: rect.top - origin.y,
+      };
+    }
+    else {
+      snapOffset = snapOptions.offset || { x: 0, y: 0 };
+    }
 
-    if (rect && snapOptions && snapOptions.relativePoints && snapOptions.relativePoints.length) {
+    if (rect && snapOptions.relativePoints && snapOptions.relativePoints.length) {
       for (const { x: relativeX, y: relativeY } of snapOptions.relativePoints) {
         offsets.push({
           x: startOffset.left - (rect.width  * relativeX) + snapOffset.x,
@@ -69,9 +80,6 @@ const snap = {
 
     status.realX = page.x;
     status.realY = page.y;
-
-    page.x -= interaction.inertiaStatus.resumeDx;
-    page.y -= interaction.inertiaStatus.resumeDy;
 
     const offsets = interaction.modifierOffsets.snap;
     let len = snapOptions.targets? snapOptions.targets.length : 0;
@@ -209,6 +217,12 @@ const snap = {
 
 interact.createSnapGrid = function (grid) {
   return function (x, y) {
+    const limits = grid.limits || {
+      left  : -Infinity,
+      right :  Infinity,
+      top   : -Infinity,
+      bottom:  Infinity,
+    };
     let offsetX = 0;
     let offsetY = 0;
 
@@ -220,8 +234,8 @@ interact.createSnapGrid = function (grid) {
     const gridx = Math.round((x - offsetX) / grid.x);
     const gridy = Math.round((y - offsetY) / grid.y);
 
-    const newX = gridx * grid.x + offsetX;
-    const newY = gridy * grid.y + offsetY;
+    const newX = Math.max(limits.left, Math.min(limits.right , gridx * grid.x + offsetX));
+    const newY = Math.max(limits.top , Math.min(limits.bottom, gridy * grid.y + offsetY));
 
     return {
       x: newX,

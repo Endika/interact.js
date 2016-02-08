@@ -1,18 +1,17 @@
-const base = require('./base');
-const utils = require('../utils');
-const browser = require('../utils/browser');
-const scope = require('../scope');
-const InteractEvent = require('../InteractEvent');
-const Interactable = require('../Interactable');
-const Interaction = require('../Interaction');
+const actions        = require('./index');
+const utils          = require('../utils');
+const browser        = require('../utils/browser');
+const InteractEvent  = require('../InteractEvent');
+const Interactable   = require('../Interactable');
+const Interaction    = require('../Interaction');
 const defaultOptions = require('../defaultOptions');
+
+// Less Precision with touch input
+const defaultMargin = browser.supportsTouch || browser.supportsPointerEvent? 20: 10;
 
 const resize = {
   defaults: {
-    enabled      : false,
-    manualStart  : false,
-    max          : Infinity,
-    maxPerElement: 1,
+    enabled   : false,
 
     snap      : null,
     restrict  : null,
@@ -58,7 +57,7 @@ const resize = {
                                               interaction._eventTarget,
                                               element,
                                               rect,
-                                              resizeOptions.margin || scope.margin);
+                                              resizeOptions.margin || defaultMargin);
         }
 
         resizeEdges.left = resizeEdges.left && !resizeEdges.right;
@@ -72,8 +71,8 @@ const resize = {
         }
       }
       else {
-        const right  = options.resize.axis !== 'y' && page.x > (rect.right  - scope.margin);
-        const bottom = options.resize.axis !== 'x' && page.y > (rect.bottom - scope.margin);
+        const right  = options.resize.axis !== 'y' && page.x > (rect.right  - defaultMargin);
+        const bottom = options.resize.axis !== 'x' && page.y > (rect.bottom - defaultMargin);
 
         if (right || bottom) {
           return {
@@ -134,7 +133,9 @@ const resize = {
   },
 };
 
-Interaction.signals.on('start-resize', function ({ interaction, event }) {
+Interaction.signals.on('action-start', function ({ interaction, event }) {
+  if (interaction.prepared.name !== 'resize') { return; }
+
   const resizeEvent = new InteractEvent(interaction, event, 'resize', 'start', interaction.element);
 
   if (interaction.prepared.edges) {
@@ -188,7 +189,9 @@ Interaction.signals.on('start-resize', function ({ interaction, event }) {
   interaction.prevEvent = resizeEvent;
 });
 
-Interaction.signals.on('move-resize', function ({ interaction, event }) {
+Interaction.signals.on('action-move', function ({ interaction, event }) {
+  if (interaction.prepared.name !== 'resize') { return; }
+
   const resizeEvent = new InteractEvent(interaction, event, 'resize', 'move', interaction.element);
   const resizeOptions = interaction.target.options.resize;
   const invert = resizeOptions.invert;
@@ -207,28 +210,20 @@ Interaction.signals.on('move-resize', function ({ interaction, event }) {
     let dx = resizeEvent.dx;
     let dy = resizeEvent.dy;
 
-    // `resize.preserveAspectRatio` takes precedence over `resize.square`
-    if (resizeOptions.preserveAspectRatio) {
-      const resizeStartAspectRatio = interaction.resizeStartAspectRatio;
+    if (resizeOptions.preserveAspectRatio || resizeOptions.square) {
+      // `resize.preserveAspectRatio` takes precedence over `resize.square`
+      const startAspectRatio = resizeOptions.preserveAspectRatio
+        ? interaction.resizeStartAspectRatio
+        : 1;
 
       edges = interaction.prepared._linkedEdges;
 
       if ((originalEdges.left && originalEdges.bottom)
           || (originalEdges.right && originalEdges.top)) {
-        dy = -dx / resizeStartAspectRatio;
+        dy = -dx / startAspectRatio;
       }
-      else if (originalEdges.left || originalEdges.right) { dy = dx / resizeStartAspectRatio; }
-      else if (originalEdges.top || originalEdges.bottom) { dx = dy * resizeStartAspectRatio; }
-    }
-    else if (resizeOptions.square) {
-      edges = interaction.prepared._linkedEdges;
-
-      if ((originalEdges.left && originalEdges.bottom)
-          || (originalEdges.right && originalEdges.top)) {
-        dy = -dx;
-      }
-      else if (originalEdges.left || originalEdges.right) { dy = dx; }
-      else if (originalEdges.top || originalEdges.bottom) { dx = dy; }
+      else if (originalEdges.left || originalEdges.right ) { dy = dx / startAspectRatio; }
+      else if (originalEdges.top  || originalEdges.bottom) { dx = dy * startAspectRatio; }
     }
 
     // update the 'current' rect without modifications
@@ -282,9 +277,14 @@ Interaction.signals.on('move-resize', function ({ interaction, event }) {
   interaction.target.fire(resizeEvent);
 
   interaction.prevEvent = resizeEvent;
+
+  // if the action was ended in a resizemove listener
+  if (!interaction.interacting()) { return false; }
 });
 
-Interaction.signals.on('end-resize', function ({ interaction, event }) {
+Interaction.signals.on('action-end', function ({ interaction, event }) {
+  if (interaction.prepared.name !== 'resize') { return; }
+
   const resizeEvent = new InteractEvent(interaction, event, 'resize', 'end', interaction.element);
 
   interaction.target.fire(resizeEvent);
@@ -345,7 +345,7 @@ Interactable.prototype.resizable = function (options) {
       this.options.resize.axis = options.axis;
     }
     else if (options.axis === null) {
-      this.options.resize.axis = scope.defaultOptions.resize.axis;
+      this.options.resize.axis = defaultOptions.resize.axis;
     }
 
     if (utils.isBool(options.preserveAspectRatio)) {
@@ -405,8 +405,8 @@ Interaction.signals.on('new', function (interaction) {
   interaction.resizeAxes = 'xy';
 });
 
-InteractEvent.signals.on('resize', function ({ interaction, iEvent }) {
-  if (!interaction.resizeAxes) { return; }
+InteractEvent.signals.on('set-delta', function ({ interaction, iEvent, action }) {
+  if (action !== 'resize' || !interaction.resizeAxes) { return; }
 
   const options = interaction.target.options;
 
@@ -431,15 +431,16 @@ InteractEvent.signals.on('resize', function ({ interaction, iEvent }) {
   }
 });
 
-base.resize = resize;
-base.names.push('resize');
-utils.merge(scope.eventTypes, [
+actions.resize = resize;
+actions.names.push('resize');
+utils.merge(Interactable.eventTypes, [
   'resizestart',
   'resizemove',
   'resizeinertiastart',
+  'resizeinertiaresume',
   'resizeend',
 ]);
-base.methodDict.resize = 'resizable';
+actions.methodDict.resize = 'resizable';
 
 defaultOptions.resize = resize.defaults;
 

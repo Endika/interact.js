@@ -1,9 +1,10 @@
-const base = require('./base');
-const utils = require('../utils');
-const scope = require('../scope');
-const InteractEvent = require('../InteractEvent');
-const Interactable = require('../Interactable');
-const Interaction = require('../Interaction');
+const actions        = require('./index');
+const utils          = require('../utils');
+const scope          = require('../scope');
+const interact       = require('../interact');
+const InteractEvent  = require('../InteractEvent');
+const Interactable   = require('../Interactable');
+const Interaction    = require('../Interaction');
 const defaultOptions = require('../defaultOptions');
 
 const drop = {
@@ -14,7 +15,11 @@ const drop = {
   },
 };
 
-Interaction.signals.on('start-drag', function ({ interaction, event }) {
+let dynamicDrop = false;
+
+Interaction.signals.on('action-start', function ({ interaction, event }) {
+  if (interaction.prepared.name !== 'drag') { return; }
+
   // reset active dropzones
   interaction.activeDrops.dropzones = [];
   interaction.activeDrops.elements  = [];
@@ -34,7 +39,7 @@ Interaction.signals.on('start-drag', function ({ interaction, event }) {
   }
 });
 
-InteractEvent.signals.on('new-drag', function ({ interaction, iEvent, event }) {
+InteractEvent.signals.on('new', function ({ interaction, iEvent, event }) {
   if (iEvent.type !== 'dragmove' && iEvent.type !== 'dragend') { return; }
 
   const draggableElement = interaction.element;
@@ -47,12 +52,16 @@ InteractEvent.signals.on('new-drag', function ({ interaction, iEvent, event }) {
   interaction.dropEvents = getDropEvents(interaction, event, dragEvent);
 });
 
-Interaction.signals.on('move-drag', function ({ interaction }) {
+Interaction.signals.on('action-move', function ({ interaction }) {
+  if (interaction.prepared.name !== 'drag') { return; }
+
   fireDropEvents(interaction, interaction.dropEvents);
 });
 
-Interaction.signals.on('end-drag', function ({ interaction }) {
-  fireDropEvents(interaction, interaction.dropEvents);
+Interaction.signals.on('action-end', function ({ interaction }) {
+  if (interaction.prepared.name === 'drag') {
+    fireDropEvents(interaction, interaction.dropEvents);
+  }
 });
 
 Interaction.signals.on('stop-drag', function ({ interaction }) {
@@ -83,9 +92,9 @@ function collectDrops (interaction, element) {
     }
 
     // query for new elements if necessary
-    const dropElements = current.selector
-      ? current._context.querySelectorAll(current.selector)
-      : [current._element];
+    const dropElements = utils.isString(current.target)
+      ? current._context.querySelectorAll(current.target)
+      : [current.target];
 
     for (let i = 0; i < dropElements.length; i++) {
       const currentElement = dropElements[i];
@@ -142,7 +151,7 @@ function getDrop (dragEvent, event, dragElement) {
   const interaction = dragEvent.interaction;
   const validDrops = [];
 
-  if (scope.dynamicDrop) {
+  if (dynamicDrop) {
     setActiveDrops(interaction, dragElement);
   }
 
@@ -176,22 +185,23 @@ function getDropEvents (interaction, pointerEvent, dragEvent) {
     drop      : null,
   };
 
+  const tmpl = {
+    dragEvent,
+    interaction,
+    target       : interaction.dropElement,
+    dropzone     : interaction.dropTarget,
+    relatedTarget: dragEvent.target,
+    draggable    : dragEvent.interactable,
+    timeStamp    : dragEvent.timeStamp,
+  };
+
   if (interaction.dropElement !== interaction.prevDropElement) {
     // if there was a prevDropTarget, create a dragleave event
     if (interaction.prevDropTarget) {
-      dropEvents.leave = {
-        dragEvent,
-        interaction,
-        target       : interaction.prevDropElement,
-        dropzone     : interaction.prevDropTarget,
-        relatedTarget: dragEvent.target,
-        draggable    : dragEvent.interactable,
-        timeStamp    : dragEvent.timeStamp,
-        type         : 'dragleave',
-      };
+      dropEvents.leave = utils.extend({ type: 'dragleave' }, tmpl);
 
-      dragEvent.dragLeave    = interaction.prevDropElement;
-      dragEvent.prevDropzone = interaction.prevDropTarget;
+      dragEvent.dragLeave    = dropEvents.leave.target   = interaction.prevDropElement;
+      dragEvent.prevDropzone = dropEvents.leave.dropzone = interaction.prevDropTarget;
     }
     // if the dropTarget is not null, create a dragenter event
     if (interaction.dropTarget) {
@@ -212,55 +222,29 @@ function getDropEvents (interaction, pointerEvent, dragEvent) {
   }
 
   if (dragEvent.type === 'dragend' && interaction.dropTarget) {
-    dropEvents.drop = {
-      dragEvent,
-      interaction,
-      target       : interaction.dropElement,
-      dropzone     : interaction.dropTarget,
-      relatedTarget: dragEvent.target,
-      draggable    : dragEvent.interactable,
-      timeStamp    : dragEvent.timeStamp,
-      type         : 'drop',
-    };
+    dropEvents.drop = utils.extend({ type: 'drop' }, tmpl);
 
     dragEvent.dropzone = interaction.dropTarget;
+    dragEvent.relatedTarget = interaction.dropElement;
   }
   if (dragEvent.type === 'dragstart') {
-    dropEvents.activate = {
-      dragEvent,
-      interaction,
-      target       : null,
-      dropzone     : null,
-      relatedTarget: dragEvent.target,
-      draggable    : dragEvent.interactable,
-      timeStamp    : dragEvent.timeStamp,
-      type         : 'dropactivate',
-    };
+    dropEvents.activate = utils.extend({ type: 'dropactivate' }, tmpl);
+
+    dropEvents.activate.target   = null;
+    dropEvents.activate.dropzone = null;
   }
   if (dragEvent.type === 'dragend') {
-    dropEvents.deactivate = {
-      dragEvent,
-      interaction,
-      target       : null,
-      dropzone     : null,
-      relatedTarget: dragEvent.target,
-      draggable    : dragEvent.interactable,
-      timeStamp    : dragEvent.timeStamp,
-      type         : 'dropdeactivate',
-    };
+    dropEvents.deactivate = utils.extend({ type: 'dropdeactivate' }, tmpl);
+
+    dropEvents.deactivate.target   = null;
+    dropEvents.deactivate.dropzone = null;
   }
   if (dragEvent.type === 'dragmove' && interaction.dropTarget) {
-    dropEvents.move = {
-      dragEvent,
-      interaction,
-      target       : interaction.dropElement,
-      dropzone     : interaction.dropTarget,
-      relatedTarget: dragEvent.target,
-      draggable    : dragEvent.interactable,
+    dropEvents.move = utils.extend({
       dragmove     : dragEvent,
-      timeStamp    : dragEvent.timeStamp,
       type         : 'dropmove',
-    };
+    }, tmpl);
+
     dragEvent.dropzone = interaction.dropTarget;
   }
 
@@ -335,12 +319,12 @@ Interactable.prototype.dropzone = function (options) {
   if (utils.isObject(options)) {
     this.options.drop.enabled = options.enabled === false? false: true;
 
-    if (utils.isFunction(options.ondrop)          ) { this.ondrop           = options.ondrop          ; }
-    if (utils.isFunction(options.ondropactivate)  ) { this.ondropactivate   = options.ondropactivate  ; }
-    if (utils.isFunction(options.ondropdeactivate)) { this.ondropdeactivate = options.ondropdeactivate; }
-    if (utils.isFunction(options.ondragenter)     ) { this.ondragenter      = options.ondragenter     ; }
-    if (utils.isFunction(options.ondragleave)     ) { this.ondragleave      = options.ondragleave     ; }
-    if (utils.isFunction(options.ondropmove)      ) { this.ondropmove       = options.ondropmove      ; }
+    if (utils.isFunction(options.ondrop)          ) { this._iEvents.ondrop           = options.ondrop          ; }
+    if (utils.isFunction(options.ondropactivate)  ) { this._iEvents.ondropactivate   = options.ondropactivate  ; }
+    if (utils.isFunction(options.ondropdeactivate)) { this._iEvents.ondropdeactivate = options.ondropdeactivate; }
+    if (utils.isFunction(options.ondragenter)     ) { this._iEvents.ondragenter      = options.ondragenter     ; }
+    if (utils.isFunction(options.ondragleave)     ) { this._iEvents.ondragleave      = options.ondragleave     ; }
+    if (utils.isFunction(options.ondropmove)      ) { this._iEvents.ondropmove       = options.ondropmove      ; }
 
     if (/^(pointer|center)$/.test(options.overlap)) {
       this.options.drop.overlap = options.overlap;
@@ -425,6 +409,8 @@ Interactable.signals.on('unset', function ({ interactable }) {
   interactable.dropzone(false);
 });
 
+Interactable.settingsMethods.push('dropChecker');
+
 Interaction.signals.on('new', function (interaction) {
   interaction.dropTarget      = null; // the dropzone a drag target might be dropped into
   interaction.dropElement     = null; // the element at the time of checking
@@ -445,7 +431,31 @@ Interaction.signals.on('stop', function ({ interaction }) {
     interaction.prevDropTarget = interaction.prevDropElement = null;
 });
 
-utils.merge(scope.eventTypes, [
+/*\
+ * interact.dynamicDrop
+ [ method ]
+ *
+ * Returns or sets whether the dimensions of dropzone elements are
+ * calculated on every dragmove or only on dragstart for the default
+ * dropChecker
+ *
+ - newValue (boolean) #optional True to check on each move. False to check only before start
+ = (boolean | interact) The current setting or interact
+\*/
+interact.dynamicDrop = function (newValue) {
+  if (utils.isBool(newValue)) {
+    //if (dragging && dynamicDrop !== newValue && !newValue) {
+      //calcRects(dropzones);
+    //}
+
+    dynamicDrop = newValue;
+
+    return interact;
+  }
+  return dynamicDrop;
+};
+
+utils.merge(Interactable.eventTypes, [
   'dragenter',
   'dragleave',
   'dropactivate',
@@ -453,7 +463,7 @@ utils.merge(scope.eventTypes, [
   'dropmove',
   'drop',
 ]);
-base.methodDict.drop = 'dropzone';
+actions.methodDict.drop = 'dropzone';
 
 defaultOptions.drop = drop.defaults;
 

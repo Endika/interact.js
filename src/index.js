@@ -1,26 +1,34 @@
-// browser entry point
+/* browser entry point */
 
 // Legacy browser support
 require('./legacyBrowsers');
 
-// actions
-require('./actions/resize');
-require('./actions/drag');
-require('./actions/drop');
-require('./actions/gesture');
-
-require('./delay.js');
-
-// autoScroll
-require('./autoScroll');
-
 // pointerEvents
 require('./pointerEvents');
+require('./pointerEvents/interactableTargets');
+
+// inertia
+require('./inertia');
 
 // modifiers
 require('./modifiers/snap');
 require('./modifiers/restrict');
 
-require('./Interaction.js');
+// delay
+require('./autoStart/delay');
 
+// actions
+require('./autoStart/gesture');
+require('./autoStart/resize');
+require('./autoStart/drag');
+
+require('./actions/drop');
+
+// Interactable preventDefault setting
+require('./interactablePreventDefault.js');
+
+// autoScroll
+require('./autoScroll');
+
+// export interact
 module.exports = require('./interact');

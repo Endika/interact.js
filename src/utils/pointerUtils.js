@@ -1,7 +1,8 @@
-const hypot   = require('./hypot');
-const browser = require('./browser');
-const dom     = require('./domObjects');
-const isType  = require('./isType');
+const hypot         = require('./hypot');
+const browser       = require('./browser');
+const dom           = require('./domObjects');
+const isType        = require('./isType');
+const pointerExtend = require('./pointerExtend');
 
 const pointerUtils = {
   copyCoords: function (dest, src) {
@@ -16,14 +17,12 @@ const pointerUtils = {
     dest.timeStamp = src.timeStamp;
   },
 
-  setEventDeltas: function (targetObj, prev, cur) {
-    const now = new Date().getTime();
-
-    targetObj.page.x    = cur.page.x   - prev.page.x;
-    targetObj.page.y    = cur.page.y   - prev.page.y;
-    targetObj.client.x  = cur.client.x - prev.client.x;
-    targetObj.client.y  = cur.client.y - prev.client.y;
-    targetObj.timeStamp = now          - prev.timeStamp;
+  setCoordDeltas: function (targetObj, prev, cur) {
+    targetObj.page.x    = cur.page.x    - prev.page.x;
+    targetObj.page.y    = cur.page.y    - prev.page.y;
+    targetObj.client.x  = cur.client.x  - prev.client.x;
+    targetObj.client.y  = cur.client.y  - prev.client.y;
+    targetObj.timeStamp = cur.timeStamp - prev.timeStamp;
 
     // set pointer velocity
     const dt = Math.max(targetObj.timeStamp / 1000, 0.001);
@@ -87,29 +86,25 @@ const pointerUtils = {
     return isType.isNumber(pointer.pointerId)? pointer.pointerId : pointer.identifier;
   },
 
-  prefixedPropREs: {
-    webkit: /(Movement[XY]|Radius[XY]|RotationAngle|Force)$/,
+  setCoords: function (targetObj, pointers, timeStamp) {
+    const pointer = (pointers.length > 1
+                     ? pointerUtils.pointerAverage(pointers)
+                     : pointers[0]);
+
+    const tmpXY = {};
+
+    pointerUtils.getPageXY(pointer, tmpXY);
+    targetObj.page.x = tmpXY.x;
+    targetObj.page.y = tmpXY.y;
+
+    pointerUtils.getClientXY(pointer, tmpXY);
+    targetObj.client.x = tmpXY.x;
+    targetObj.client.y = tmpXY.y;
+
+    targetObj.timeStamp = isType.isNumber(timeStamp) ? timeStamp :new Date().getTime();
   },
 
-  pointerExtend: function (dest, source) {
-    for (const prop in source) {
-      const prefixedPropREs = pointerUtils.prefixedPropREs;
-      let deprecated = false;
-
-      // skip deprecated prefixed properties
-      for (const vendor in prefixedPropREs) {
-        if (prop.indexOf(vendor) === 0 && prefixedPropREs[vendor].test(prop)) {
-          deprecated = true;
-          break;
-        }
-      }
-
-      if (!deprecated) {
-        dest[prop] = source[prop];
-      }
-    }
-    return dest;
-  },
+  pointerExtend: pointerExtend,
 
   getTouchPair: function (event) {
     const touches = [];
@@ -203,27 +198,9 @@ const pointerUtils = {
     const sourceX = deltaSource + 'X';
     const sourceY = deltaSource + 'Y';
     const touches = pointerUtils.getTouchPair(event);
-    const dx = touches[0][sourceX] - touches[1][sourceX];
-    const dy = touches[0][sourceY] - touches[1][sourceY];
-    let angle = 180 * Math.atan(dy / dx) / Math.PI;
-
-    if (isType.isNumber(prevAngle)) {
-      const dr = angle - prevAngle;
-      const drClamped = dr % 360;
-
-      if (drClamped > 315) {
-        angle -= 360 + (angle / 360)|0 * 360;
-      }
-      else if (drClamped > 135) {
-        angle -= 180 + (angle / 360)|0 * 360;
-      }
-      else if (drClamped < -315) {
-        angle += 360 + (angle / 360)|0 * 360;
-      }
-      else if (drClamped < -135) {
-        angle += 180 + (angle / 360)|0 * 360;
-      }
-    }
+    const dx = touches[1][sourceX] - touches[0][sourceX];
+    const dy = touches[1][sourceY] - touches[0][sourceY];
+    const angle = 180 * Math.atan2(dy , dx) / Math.PI;
 
     return  angle;
   },

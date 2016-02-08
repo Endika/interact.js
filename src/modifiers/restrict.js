@@ -1,5 +1,5 @@
-const modifiers = require('./base');
-const utils = require('../utils');
+const modifiers      = require('./index');
+const utils          = require('../utils');
 const defaultOptions = require('../defaultOptions');
 
 const restrict = {
@@ -49,9 +49,6 @@ const restrict = {
       ? { x: status.x, y: status.y }
       : utils.extend({}, pageCoords);
 
-    page.x -= interaction.inertiaStatus.resumeDx;
-    page.y -= interaction.inertiaStatus.resumeDy;
-
     status.dx = 0;
     status.dy = 0;
     status.locked = false;
@@ -62,7 +59,7 @@ const restrict = {
 
     if (utils.isString(restriction)) {
       if (restriction === 'parent') {
-        restriction = utils.parentElement(interaction.element);
+        restriction = utils.parentNode(interaction.element);
       }
       else if (restriction === 'self') {
         restriction = target.getRect(interaction.element);
@@ -127,7 +124,7 @@ const restrict = {
     const options = interactable.options[actionName].restrict;
     const elementRect = options && options.elementRect;
 
-    if (modifiers.restrict.shouldDo(interactable, actionName)
+    if (options && options.enabled
         && !(phase === 'start' && elementRect && status.locked)) {
 
       if (status.locked) {

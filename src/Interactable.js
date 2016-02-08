@@ -1,13 +1,15 @@
-const isType  = require('./utils/isType');
-const events  = require('./utils/events');
-const extend  = require('./utils/extend');
-const actions = require('./actions/base');
-const scope   = require('./scope');
+const isType    = require('./utils/isType');
+const events    = require('./utils/events');
+const extend    = require('./utils/extend');
+const actions   = require('./actions');
+const scope     = require('./scope');
+const Eventable = require('./Eventable');
+const defaults  = require('./defaultOptions');
+const signals   = require('./utils/Signals').new();
 
-const { getElementRect }    = require('./utils/domUtils');
-const { indexOf, contains } = require('./utils/arr');
-
-const signals = new (require('./utils/Signals'));
+const { getElementRect, nodeContains } = require('./utils/domUtils');
+const { indexOf, contains }            = require('./utils/arr');
+const { wheelEvent }                   = require('./utils/browser');
 
 // all set interactables
 scope.interactables = [];
@@ -19,15 +21,15 @@ scope.interactables = [];
  * Object type returned by @interact
 \*/
 class Interactable {
-  constructor (element, options) {
-    this._element = element;
+  constructor (target, options) {
+    this.target   = target;
     this._context = scope.document;
-    this._iEvents = this._iEvents || {};
+    this._iEvents = new Eventable();
 
     let _window;
 
-    if (isType.trySelector(element)) {
-      this.selector = element;
+    if (isType.trySelector(target)) {
+      this.target = target;
 
       const context = options && options.context;
 
@@ -41,24 +43,19 @@ class Interactable {
       }
     }
     else {
-      _window = scope.getWindow(element);
+      _window = scope.getWindow(target);
     }
 
     this._doc = _window.document;
 
     signals.fire('new', {
-      element,
+      target,
       options,
       interactable: this,
       win: _window,
     });
 
-    if (this._doc !== scope.document) {
-      signals.fire('listen-to-document', {
-        doc: this._doc,
-        win: _window,
-      });
-    }
+    scope.addDocument( this._doc, _window );
 
     scope.interactables.push(this);
 
@@ -68,10 +65,10 @@ class Interactable {
   setOnEvents (action, phases) {
     const onAction = 'on' + action;
 
-    if (isType.isFunction(phases.onstart)       ) { this[onAction + 'start'        ] = phases.onstart         ; }
-    if (isType.isFunction(phases.onmove)        ) { this[onAction + 'move'         ] = phases.onmove          ; }
-    if (isType.isFunction(phases.onend)         ) { this[onAction + 'end'          ] = phases.onend           ; }
-    if (isType.isFunction(phases.oninertiastart)) { this[onAction + 'inertiastart' ] = phases.oninertiastart  ; }
+    if (isType.isFunction(phases.onstart)       ) { this._iEvents[onAction + 'start'        ] = phases.onstart         ; }
+    if (isType.isFunction(phases.onmove)        ) { this._iEvents[onAction + 'move'         ] = phases.onmove          ; }
+    if (isType.isFunction(phases.onend)         ) { this._iEvents[onAction + 'end'          ] = phases.onend           ; }
+    if (isType.isFunction(phases.oninertiastart)) { this._iEvents[onAction + 'inertiastart' ] = phases.oninertiastart  ; }
 
     return this;
   }
@@ -80,17 +77,17 @@ class Interactable {
     // for all the default per-action options
     for (const option in options) {
       // if this option exists for this action
-      if (option in scope.defaultOptions[action]) {
+      if (option in defaults[action]) {
         // if the option in the options arg is an object value
         if (isType.isObject(options[option])) {
           // duplicate the object
           this.options[action][option] = extend(this.options[action][option] || {}, options[option]);
 
-          if (isType.isObject(scope.defaultOptions.perAction[option]) && 'enabled' in scope.defaultOptions.perAction[option]) {
+          if (isType.isObject(defaults.perAction[option]) && 'enabled' in defaults.perAction[option]) {
             this.options[action][option].enabled = options[option].enabled === false? false : true;
           }
         }
-        else if (isType.isBool(options[option]) && isType.isObject(scope.defaultOptions.perAction[option])) {
+        else if (isType.isBool(options[option]) && isType.isObject(defaults.perAction[option])) {
           this.options[action][option].enabled = options[option];
         }
         else if (options[option] !== undefined) {
@@ -99,60 +96,6 @@ class Interactable {
         }
       }
     }
-  }
-
-  getAction (pointer, event, interaction, element) {
-    const action = this.defaultActionChecker(pointer, event, interaction, element);
-
-    if (this.options.actionChecker) {
-      return this.options.actionChecker(pointer, event, action, this, element, interaction);
-    }
-
-    return action;
-  }
-
-  /*\
-   * Interactable.actionChecker
-   [ method ]
-   *
-   * Gets or sets the function used to check action to be performed on
-   * pointerDown
-   *
-   - checker (function | null) #optional A function which takes a pointer event, defaultAction string, interactable, element and interaction as parameters and returns an object with name property 'drag' 'resize' or 'gesture' and optionally an `edges` object with boolean 'top', 'left', 'bottom' and right props.
-   = (Function | Interactable) The checker function or this Interactable
-   *
-   | interact('.resize-drag')
-   |   .resizable(true)
-   |   .draggable(true)
-   |   .actionChecker(function (pointer, event, action, interactable, element, interaction) {
-   |
-   |   if (interact.matchesSelector(event.target, '.drag-handle') {
-   |     // force drag with handle target
-   |     action.name = drag;
-   |   }
-   |   else {
-   |     // resize from the top and right edges
-   |     action.name  = 'resize';
-   |     action.edges = { top: true, right: true };
-   |   }
-   |
-   |   return action;
-   | });
-  \*/
-  actionChecker (checker) {
-    if (isType.isFunction(checker)) {
-      this.options.actionChecker = checker;
-
-      return this;
-    }
-
-    if (checker === null) {
-      delete this.options.actionChecker;
-
-      return this;
-    }
-
-    return this.options.actionChecker;
   }
 
   /*\
@@ -174,10 +117,10 @@ class Interactable {
    o }
   \*/
   getRect (element) {
-    element = element || this._element;
+    element = element || this.target;
 
-    if (this.selector && !(isType.isElement(element))) {
-      element = this._context.querySelector(this.selector);
+    if (isType.isString(this.target) && !(isType.isElement(element))) {
+      element = this._context.querySelector(this.target);
     }
 
     return getElementRect(element);
@@ -207,60 +150,6 @@ class Interactable {
     }
 
     return this.getRect;
-  }
-
-  /*\
-   * Interactable.styleCursor
-   [ method ]
-   *
-   * Returns or sets whether the action that would be performed when the
-   * mouse on the element are checked on `mousemove` so that the cursor
-   * may be styled appropriately
-   *
-   - newValue (boolean) #optional
-   = (boolean | Interactable) The current setting or this Interactable
-  \*/
-  styleCursor (newValue) {
-    if (isType.isBool(newValue)) {
-      this.options.styleCursor = newValue;
-
-      return this;
-    }
-
-    if (newValue === null) {
-      delete this.options.styleCursor;
-
-      return this;
-    }
-
-    return this.options.styleCursor;
-  }
-
-  /*\
-   * Interactable.preventDefault
-   [ method ]
-   *
-   * Returns or sets whether to prevent the browser's default behaviour
-   * in response to pointer events. Can be set to:
-   *  - `'always'` to always prevent
-   *  - `'never'` to never prevent
-   *  - `'auto'` to let interact.js try to determine what would be best
-   *
-   - newValue (string) #optional `true`, `false` or `'auto'`
-   = (string | Interactable) The current setting or this Interactable
-  \*/
-  preventDefault (newValue) {
-    if (/^(always|never|auto)$/.test(newValue)) {
-      this.options.preventDefault = newValue;
-      return this;
-    }
-
-    if (isType.isBool(newValue)) {
-      this.options.preventDefault = newValue? 'always' : 'never';
-      return this;
-    }
-
-    return this.options.preventDefault;
   }
 
   /*\
@@ -322,75 +211,9 @@ class Interactable {
     return this._context;
   }
 
-  /*\
-   * Interactable.ignoreFrom
-   [ method ]
-   *
-   * If the target of the `mousedown`, `pointerdown` or `touchstart`
-   * event or any of it's parents match the given CSS selector or
-   * Element, no drag/resize/gesture is started.
-   *
-   - newValue (string | Element | null) #optional a CSS selector string, an Element or `null` to not ignore any elements
-   = (string | Element | object) The current ignoreFrom value or this Interactable
-   **
-   | interact(element, { ignoreFrom: document.getElementById('no-action') });
-   | // or
-   | interact(element).ignoreFrom('input, textarea, a');
-  \*/
-  ignoreFrom (newValue) {
-    if (isType.trySelector(newValue)) {            // CSS selector to match event.target
-      this.options.ignoreFrom = newValue;
-      return this;
-    }
-
-    if (isType.isElement(newValue)) {              // specific element
-      this.options.ignoreFrom = newValue;
-      return this;
-    }
-
-    return this.options.ignoreFrom;
-  }
-
-  /*\
-   * Interactable.allowFrom
-   [ method ]
-   *
-   * A drag/resize/gesture is started only If the target of the
-   * `mousedown`, `pointerdown` or `touchstart` event or any of it's
-   * parents match the given CSS selector or Element.
-   *
-   - newValue (string | Element | null) #optional a CSS selector string, an Element or `null` to allow from any element
-   = (string | Element | object) The current allowFrom value or this Interactable
-   **
-   | interact(element, { allowFrom: document.getElementById('drag-handle') });
-   | // or
-   | interact(element).allowFrom('.handle');
-  \*/
-  allowFrom (newValue) {
-    if (isType.trySelector(newValue)) {            // CSS selector to match event.target
-      this.options.allowFrom = newValue;
-      return this;
-    }
-
-    if (isType.isElement(newValue)) {              // specific element
-      this.options.allowFrom = newValue;
-      return this;
-    }
-
-    return this.options.allowFrom;
-  }
-
-  /*\
-   * Interactable.element
-   [ method ]
-   *
-   * If this is not a selector Interactable, it returns the element this
-   * interactable represents
-   *
-   = (Element) HTML / SVG Element
-  \*/
-  element () {
-    return this._element;
+  inContext (element) {
+    return (this._context === element.ownerDocument
+            || nodeContains(this._context, element));
   }
 
   /*\
@@ -404,43 +227,38 @@ class Interactable {
    = (Interactable) this Interactable
   \*/
   fire (iEvent) {
-    if (!(iEvent && iEvent.type) || !contains(scope.eventTypes, iEvent.type)) {
-      return this;
-    }
-
-    let listeners;
-    const onEvent = 'on' + iEvent.type;
-
-    // Interactable#on() listeners
-    if (iEvent.type in this._iEvents) {
-      listeners = this._iEvents[iEvent.type];
-
-      for (let i = 0, len = listeners.length; i < len && !iEvent.immediatePropagationStopped; i++) {
-        listeners[i](iEvent);
-      }
-    }
-
-    // interactable.onevent listener
-    if (isType.isFunction(this[onEvent])) {
-      this[onEvent](iEvent);
-    }
-
-    // interact.on() listeners
-    if (iEvent.type in scope.globalEvents && (listeners = scope.globalEvents[iEvent.type]))  {
-
-      for (let i = 0, len = listeners.length; i < len && !iEvent.immediatePropagationStopped; i++) {
-        listeners[i](iEvent);
-      }
-    }
+    this._iEvents.fire(iEvent);
 
     return this;
+  }
+
+  _onOffMultiple (method, eventType, listener, useCapture) {
+    if (isType.isString(eventType) && eventType.search(' ') !== -1) {
+      eventType = eventType.trim().split(/ +/);
+    }
+
+    if (isType.isArray(eventType)) {
+      for (let i = 0; i < eventType.length; i++) {
+        this[method](eventType[i], listener, useCapture);
+      }
+
+      return true;
+    }
+
+    if (isType.isObject(eventType)) {
+      for (const prop in eventType) {
+        this[method](prop, eventType[prop], listener);
+      }
+
+      return true;
+    }
   }
 
   /*\
    * Interactable.on
    [ method ]
    *
-   * Binds a listener for an InteractEvent or DOM event.
+   * Binds a listener for an InteractEvent, pointerEvent or DOM event.
    *
    - eventType  (string | array | object) The types of events to listen for
    - listener   (function) The function event (s)
@@ -448,48 +266,24 @@ class Interactable {
    = (object) This Interactable
   \*/
   on (eventType, listener, useCapture) {
-    if (isType.isString(eventType) && eventType.search(' ') !== -1) {
-      eventType = eventType.trim().split(/ +/);
-    }
-
-    if (isType.isArray(eventType)) {
-      for (let i = 0; i < eventType.length; i++) {
-        this.on(eventType[i], listener, useCapture);
-      }
-
-      return this;
-    }
-
-    if (isType.isObject(eventType)) {
-      for (const prop in eventType) {
-        this.on(prop, eventType[prop], listener);
-      }
-
-      return this;
-    }
-
-    if (eventType === 'wheel') {
-      eventType = scope.wheelEvent;
-    }
-
     // convert to boolean
-    useCapture = useCapture? true: false;
+    useCapture = !!useCapture;
 
-    if (contains(scope.eventTypes, eventType)) {
-      // if this type of event was never bound to this Interactable
-      if (!(eventType in this._iEvents)) {
-        this._iEvents[eventType] = [listener];
-      }
-      else {
-        this._iEvents[eventType].push(listener);
-      }
+    if (this._onOffMultiple('on', eventType, listener, useCapture)) {
+      return this;
+    }
+
+    if (eventType === 'wheel') { eventType = wheelEvent; }
+
+    if (contains(Interactable.eventTypes, eventType)) {
+      this._iEvents.on(eventType, listener);
     }
     // delegated event for selector
-    else if (this.selector) {
-      events.addDelegate(this.selector, this._context, eventType, listener, useCapture);
+    else if (isType.isString(this.target)) {
+      events.addDelegate(this.target, this._context, eventType, listener, useCapture);
     }
     else {
-      events.add(this._element, eventType, listener, useCapture);
+      events.add(this.target, eventType, listener, useCapture);
     }
 
     return this;
@@ -499,7 +293,7 @@ class Interactable {
    * Interactable.off
    [ method ]
    *
-   * Removes an InteractEvent or DOM event listener
+   * Removes an InteractEvent, pointerEvent or DOM event listener
    *
    - eventType  (string | array | object) The types of events that were listened for
    - listener   (function) The listener function to be removed
@@ -507,50 +301,26 @@ class Interactable {
    = (object) This Interactable
   \*/
   off (eventType, listener, useCapture) {
-    if (isType.isString(eventType) && eventType.search(' ') !== -1) {
-      eventType = eventType.trim().split(/ +/);
-    }
-
-    if (isType.isArray(eventType)) {
-      for (let i = 0; i < eventType.length; i++) {
-        this.off(eventType[i], listener, useCapture);
-      }
-
-      return this;
-    }
-
-    if (isType.isObject(eventType)) {
-      for (const prop in eventType) {
-        this.off(prop, eventType[prop], listener);
-      }
-
-      return this;
-    }
-
-
     // convert to boolean
-    useCapture = useCapture? true: false;
+    useCapture = !!useCapture;
 
-    if (eventType === 'wheel') {
-      eventType = scope.wheelEvent;
+    if (this._onOffMultiple('off', eventType, listener, useCapture)) {
+      return this;
     }
+
+    if (eventType === 'wheel') { eventType = wheelEvent; }
 
     // if it is an action event type
-    if (contains(scope.eventTypes, eventType)) {
-      const eventList = this._iEvents[eventType];
-      const index     = eventList? indexOf(eventList, listener) : -1;
-
-      if (index !== -1) {
-        this._iEvents[eventType].splice(index, 1);
-      }
+    if (contains(Interactable.eventTypes, eventType)) {
+      this._iEvents.on(eventType, listener);
     }
     // delegated event
-    else if (this.selector) {
-      events.removeDelegate(this.selector, this._context, eventType, listener, useCapture);
+    else if (isType.isString(this.target)) {
+      events.removeDelegate(this.target, this._context, eventType, listener, useCapture);
     }
     // remove listener from this Interatable's element
     else {
-      events.remove(this._element, eventType, listener, useCapture);
+      events.remove(this.target, eventType, listener, useCapture);
     }
 
     return this;
@@ -569,30 +339,22 @@ class Interactable {
       options = {};
     }
 
-    this.options = extend({}, scope.defaultOptions.base);
+    this.options = extend({}, defaults.base);
 
-    const perActions = extend({}, scope.defaultOptions.perAction);
+    const perActions = extend({}, defaults.perAction);
 
     for (const actionName in actions.methodDict) {
       const methodName = actions.methodDict[actionName];
 
-      this.options[actionName] = extend({}, scope.defaultOptions[actionName]);
+      this.options[actionName] = extend({}, defaults[actionName]);
 
       this.setPerAction(actionName, perActions);
 
       this[methodName](options[actionName]);
     }
 
-    const settings = [
-      'accept', 'actionChecker', 'allowFrom', 'deltaSource',
-      'dropChecker', 'ignoreFrom', 'origin', 'preventDefault',
-      'rectChecker', 'styleCursor',
-    ];
-
-    for (let i = 0, len = settings.length; i < len; i++) {
-      const setting = settings[i];
-
-      this.options[setting] = scope.defaultOptions.base[setting];
+    for (const setting of Interactable.settingsMethods) {
+      this.options[setting] = defaults.base[setting];
 
       if (setting in options) {
         this[setting](options[setting]);
@@ -612,21 +374,15 @@ class Interactable {
    = (object) @interact
   \*/
   unset () {
-    events.remove(this._element, 'all');
+    events.remove(this.target, 'all');
 
-    if (!isType.isString(this.selector)) {
-      events.remove(this, 'all');
-      if (this.options.styleCursor) {
-        this._element.style.cursor = '';
-      }
-    }
-    else {
+    if (isType.isString(this.target)) {
       // remove delegated events
       for (const type in events.delegatedEvents) {
         const delegated = events.delegatedEvents[type];
 
         for (let i = 0; i < delegated.selectors.length; i++) {
-          if (delegated.selectors[i] === this.selector
+          if (delegated.selectors[i] === this.target
               && delegated.contexts[i] === this._context) {
 
             delegated.selectors.splice(i, 1);
@@ -646,17 +402,65 @@ class Interactable {
         }
       }
     }
+    else {
+      events.remove(this, 'all');
+    }
 
     signals.fire('unset', { interactable: this });
 
-    scope.interactables.splice(isType.indexOf(scope.interactables, this), 1);
+    scope.interactables.splice(indexOf(scope.interactables, this), 1);
+
+    // Stop related interactions when an Interactable is unset
+    for (const interaction of scope.interactions || []) {
+      if (interaction.target === this && interaction.interacting()) {
+        interaction.stop();
+      }
+    }
 
     return scope.interact;
   }
 }
 
-Interactable.prototype.defaultActionChecker = actions.defaultChecker;
+scope.interactables.indexOfElement = function indexOfElement (target, context) {
+  context = context || scope.document;
+
+  for (let i = 0; i < this.length; i++) {
+    const interactable = this[i];
+
+    if (interactable.target === target
+        && (!isType.isString(target) || (interactable._context === context))) {
+      return i;
+    }
+  }
+  return -1;
+};
+
+scope.interactables.get = function interactableGet (element, options) {
+  return this[this.indexOfElement(element, options && options.context)];
+};
+
+scope.interactables.forEachSelector = function (callback) {
+  for (let i = 0; i < this.length; i++) {
+    const interactable = this[i];
+
+    // skip non CSS selector targets
+    if (!isType.isString(interactable.target)) {
+      continue;
+    }
+
+    const ret = callback(interactable, interactable.target, interactable._context, i, this);
+
+    if (ret !== undefined) {
+      return ret;
+    }
+  }
+};
+
+// all interact.js eventTypes
+Interactable.eventTypes = scope.eventTypes = [];
 
 Interactable.signals = signals;
+
+Interactable.settingsMethods = [ 'deltaSource', 'origin', 'preventDefault', 'rectChecker' ];
 
 module.exports = Interactable;
